@@ -1,0 +1,1173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>线体节拍核对</title>
+<style>
+:root{
+  --bg:#f4f6f9; --card:#ffffff; --ink:#1d2433; --ink2:#5b6475; --line:#dde2ea; --soft:#eef1f6;
+  --brand:#1f4e8c; --brand-soft:#e3ecf8; --input:#fffbe6; --input-line:#e6d58a;
+  --c-work:#3b6fb6; --c-move:#8fb3e0; --c-per:#c9d8ee; --c-hi:#c0392b;
+  --tt:#d0312d; --target:#e8861a; --lt:#6b7280; --dt:#7b3fa6;
+  --ok:#1e8a4c; --ok-soft:#e3f4ea; --warn:#b7791f; --warn-soft:#fdf3dc; --ng:#c0392b; --ng-soft:#fbe5e2;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12161d; --card:#1b212b; --ink:#e6e9ef; --ink2:#9aa3b2; --line:#2e3644; --soft:#232b37;
+    --brand:#7fa8e0; --brand-soft:#22324a; --input:#2a2716; --input-line:#5a5226;
+    --c-work:#5b8fd6; --c-move:#3f6596; --c-per:#2f4566; --c-hi:#ef6b5b;
+    --tt:#ef5b56; --target:#f0a050; --lt:#9aa3b2; --dt:#b48ad6;
+    --ok:#4cc27e; --ok-soft:#173226; --warn:#e0b050; --warn-soft:#352b14; --ng:#ef6b5b; --ng-soft:#3a1d1a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12161d; --card:#1b212b; --ink:#e6e9ef; --ink2:#9aa3b2; --line:#2e3644; --soft:#232b37;
+  --brand:#7fa8e0; --brand-soft:#22324a; --input:#2a2716; --input-line:#5a5226;
+  --c-work:#5b8fd6; --c-move:#3f6596; --c-per:#2f4566; --c-hi:#ef6b5b;
+  --tt:#ef5b56; --target:#f0a050; --lt:#9aa3b2; --dt:#b48ad6;
+  --ok:#4cc27e; --ok-soft:#173226; --warn:#e0b050; --warn-soft:#352b14; --ng:#ef6b5b; --ng-soft:#3a1d1a;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:16px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 14px}
+h1{font-size:20px;margin:0}
+h2{font-size:17px;margin:0 0 10px}
+h3{font-size:15px;margin:0}
+.sub{color:var(--ink2);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.step{display:inline-block;background:var(--brand);color:#fff;border-radius:50%;width:22px;height:22px;text-align:center;line-height:22px;font-size:13px;margin-right:6px}
+.types{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+.type{border:1.5px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;background:var(--card);text-align:left;color:inherit;font:inherit}
+.type b{display:block;font-size:15px;margin-bottom:4px}
+.type span{font-size:12.5px;color:var(--ink2)}
+.type.on{border-color:var(--brand);background:var(--brand-soft)}
+.collect{background:var(--soft);border-radius:8px;padding:10px 14px;margin:0 0 12px;font-size:13.5px}
+.collect ol{margin:6px 0 0;padding-left:20px}
+.collect li{margin:2px 0}
+details.sec{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;background:var(--card)}
+details.sec>summary{cursor:pointer;padding:10px 12px;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px}
+details.sec>summary::-webkit-details-marker{display:none}
+details.sec>summary::before{content:"▸";color:var(--ink2);transition:transform .15s}
+details.sec[open]>summary::before{transform:rotate(90deg)}
+.tag{font-size:11.5px;font-weight:500;border-radius:4px;padding:1px 6px}
+.tag.opt{background:var(--soft);color:var(--ink2)}
+.tag.req{background:var(--brand-soft);color:var(--brand)}
+.sec-body{padding:0 12px 12px}
+.how{font-size:13px;color:var(--ink2);margin:0 0 10px;border-left:3px solid var(--brand-soft);padding-left:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px 14px}
+.f label{display:block;font-size:13px;margin-bottom:3px}
+.f label i{font-style:normal;color:var(--ink2);font-size:12px}
+.f label .star{color:var(--ng);margin-left:2px}
+.f .hint{font-size:11.5px;color:var(--ink2);margin-top:2px}
+input,select{font:inherit;color:var(--ink);background:var(--input);border:1px solid var(--input-line);border-radius:6px;padding:7px 8px;width:100%;min-width:0}
+select{background:var(--card);border-color:var(--line)}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--brand)}
+input.bad{border-color:var(--ng);box-shadow:0 0 0 2px var(--ng-soft)}
+.tbl-wrap{overflow-x:auto;margin-top:10px}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:middle}
+th{background:var(--soft);font-weight:600;font-size:12.5px;white-space:nowrap}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+table.in td{padding:4px 6px}
+table.in input{padding:5px 6px}
+table.in td.c{text-align:center;width:52px}
+.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button.b{font:inherit;border-radius:8px;padding:9px 16px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button.b.pri{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:600;padding:10px 26px}
+button.b.sm{padding:4px 10px;font-size:13px}
+.err{color:var(--ng);font-size:13.5px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--soft);border-radius:8px;padding:10px 12px}
+.kpi .l{font-size:12.5px;color:var(--ink2)}
+.kpi .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:13px;font-weight:500;color:var(--ink2);margin-left:3px}
+.kpi .d{font-size:12.5px;color:var(--ink2)}
+.kpi.ng{background:var(--ng-soft)} .kpi.ng .v{color:var(--ng)}
+.kpi.ok{background:var(--ok-soft)} .kpi.ok .v{color:var(--ok)}
+.kpi.warn{background:var(--warn-soft)}
+.verdict{border-radius:8px;padding:10px 14px;margin-bottom:14px;font-weight:600}
+.verdict.ok{background:var(--ok-soft);color:var(--ok)}
+.verdict.ng{background:var(--ng-soft);color:var(--ng)}
+.verdict.info{background:var(--brand-soft);color:var(--brand)}
+.verdict p{margin:4px 0 0;font-weight:400;color:var(--ink);font-size:13.5px}
+.chart-box{overflow-x:auto;border:1px solid var(--line);border-radius:8px;padding:6px;background:var(--card)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink2);margin:8px 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:2px}
+.ln{display:inline-block;width:18px;height:0;border-top:2px solid}
+tr.hi td{background:var(--ng-soft)}
+tr.hi td:first-child{box-shadow:inset 3px 0 0 var(--ng)}
+.pill{display:inline-block;border-radius:10px;padding:0 8px;font-size:12px;font-weight:600;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.ng{background:var(--ng-soft);color:var(--ng)}
+.pill.info{background:var(--soft);color:var(--ink2)}
+.barcell{position:relative;min-width:90px}
+.barcell i{position:absolute;left:0;top:50%;height:8px;margin-top:-4px;background:var(--c-move);border-radius:2px}
+.barcell i.hi{background:var(--c-hi)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+.note{font-size:12.5px;color:var(--ink2);margin-top:8px}
+.hidden{display:none!important}
+@media print{
+  body{background:#fff}
+  #pick,#form,.noprint{display:none!important}
+  .card{border:none;padding:0}
+  .chart-box{overflow:visible}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>线体节拍快速核对</h1>
+      <div class="sub">LSX 设备工程部 · 口径同《节拍分析表》9.2 基础数据录入</div>
+    </div>
+    <div class="sub" id="stamp"></div>
+  </header>
+
+  <section class="card" id="pick">
+    <h2><span class="step">1</span>选择线体类型</h2>
+    <div class="types" id="types"></div>
+  </section>
+
+  <section class="card hidden" id="form">
+    <h2><span class="step">2</span>现场采集数据 <span class="sub" id="formTitle"></span></h2>
+    <div class="collect" id="collect"></div>
+    <div id="secs"></div>
+    <div class="btns" style="margin-top:12px">
+      <button class="b pri" id="go">确认，生成结果</button>
+      <button class="b" id="demo" title="载入节拍分析表中已有的实测数据，用于对照">载入分析表现有数据</button>
+      <button class="b" id="reset">清空本线型数据</button>
+      <span class="err" id="errs"></span>
+    </div>
+  </section>
+
+  <section class="hidden" id="out"></section>
+</div>
+
+<script>
+"use strict";
+/* ============ 字段/表格描述 ============ */
+const num = (k, label, unit, o = {}) => ({ k, label, unit, type: "num", ...o });
+const sel = (k, label, options, def, o = {}) => ({ k, label, type: "sel", options, def, ...o });
+
+const CAP_SEC = (use = 1) => ({
+  id: "cap", title: "产能核算基础数据", optional: true,
+  how: "无需掐表，向计划/PMC 获取。填写「客户月度需求」后，同步生成产能核算、目标线与工装/通道/焊接反算；不填则只出节拍结果。",
+  fields: [
+    num("dem", "客户月度需求", "台/月"),
+    num("use", "每台用量", "件/台", { def: use }),
+    num("days", "月工作天数", "天", { def: 26 }),
+    num("mins", "每天工作时间", "分钟", { def: 1320, hint: "生产日 08:00–次日 08:00，扣除休息后" }),
+    num("oee", "OEE", "", { def: 0.85, hint: "填小数，如 0.85" }),
+    num("tol", "容差", "秒", { def: 5, hint: "工位节拍距目标线不足该值时标黄" })
+  ]
+});
+
+const PACK_ROWS = [
+  { on: true, name: "拍照", t: "", f: "2" },
+  { on: true, name: "扫码", t: "", f: "2" },
+  { on: true, name: "盖中衬", t: "", f: "2" },
+  { on: true, name: "挪动包材", t: "", f: "3" }
+];
+const PACK_TABLE = {
+  k: "pack", title: "装箱周期性动作", max: 10, rows: PACK_ROWS,
+  cols: [
+    { k: "on", label: "启用", type: "chk" },
+    { k: "name", label: "动作名称", type: "text" },
+    { k: "t", label: "单次时间 s", type: "num" },
+    { k: "f", label: "频次", type: "sel", options: [["1", "每件"], ["2", "每层"], ["3", "每箱"]] }
+  ]
+};
+const packFields = () => [
+  num("place", "装箱 摆入箱内 单件时间", "秒/件", { req: true }),
+  num("perLayer", "每层件数", "件/层"),
+  num("layers", "每箱层数", "层/箱")
+];
+const detTable = (n, on, max) => ({
+  k: "det", title: "检测工位", max,
+  rows: Array.from({ length: n }, (_, i) => ({ on: i < on, name: "", t: "" })),
+  cols: [
+    { k: "on", label: "启用", type: "chk" },
+    { k: "name", label: "工位名称", type: "text", ph: i => "检测工位" + (i + 1) },
+    { k: "t", label: "作业时间 s", type: "num" }
+  ]
+});
+
+/* ---------- 自粘钢固化线（定子/转子共用模型） ---------- */
+function cureType(id, name, N, desc) {
+  return {
+    id, name, desc,
+    sections: [
+      { id: "load", title: "上料 / 预压 / 脱模（按工装计）",
+        how: "这三个工位按【秒/工装】掐表，系统自动 ÷ N 折合秒/件。一工装 N 件时，放满一个工装的时间整段计入。",
+        collect: "上料、预压、脱模 各连测 10 个工装的工装周期",
+        fields: [
+          num("N", "每工装装载件数 N", "件/工装", { def: N, req: true }),
+          num("load", "上料工位 人工作业 工装周期", "秒/工装", { req: true }),
+          num("pre", "预压工位 工装周期", "秒/工装", { req: true }),
+          num("demold", "脱模工位 工装周期", "秒/工装", { req: true, hint: "机械手逐件取出" })
+        ] },
+      { id: "cure", title: "固化通道（并联）",
+        how: "通道占用周期 T_ch：站在一个通道旁记录连续 10 个以上工装进加热位的时刻，相邻间隔均值即 T_ch（秒/工装）。不要用一个工装从进到出的时间——方式 2 下那是 2×T_ch。",
+        collect: "通道占用周期 T_ch（连续两工装进加热位的间隔）、在用通道",
+        fields: [
+          sel("mode", "通道内流转方式", [["1", "1 = 通道内只有一件"], ["2", "2 = 加热位+冷却位各一件(同步指进)"]], "2"),
+          num("tm", "通道占用周期 实测值", "秒/工装", { hint: "填了此项则优先采用，下面两格可空" }),
+          num("t1", "通道内工位1 时间", "秒", { hint: "选填" }),
+          num("t2", "通道内工位2 时间", "秒", { hint: "选填" })
+        ],
+        table: {
+          k: "ch", title: "通道明细（输送时间只影响延时/在制品，不影响产能，可空）", max: 16,
+          rows: Array.from({ length: 10 }, () => ({ on: true, tin: "", tout: "" })),
+          rowLabel: i => (i + 1) + "#",
+          cols: [
+            { k: "on", label: "在用", type: "chk" },
+            { k: "tin", label: "进料输送 预压→通道 s", type: "num" },
+            { k: "tout", label: "出料输送 通道→脱模 s", type: "num" }
+          ]
+        } },
+      { id: "main", title: "主通道与工装环", optional: true,
+        how: "主通道最小工装间距：在主通道一个固定点记录连续两个工装通过的最短间隔。工装数不填则不校核工装数约束。",
+        collect: "主通道最小工装间距、空工装回流时间、现有工装数（选填）",
+        fields: [
+          num("gapIn", "进料主通道 最小工装间距", "秒/工装"),
+          num("gapOut", "出料主通道 最小工装间距", "秒/工装"),
+          num("ret", "空工装回流时间", "秒"),
+          num("tools", "现有工装数", "套")
+        ] },
+      { id: "cool", title: "冷却通道（滚筒带 · 按组前移）",
+        how: "机械手把一组放满后整体前移一组。索引周期 = MAX(最短停顿, 每组件数 × 较慢机械手) + 前移时间。",
+        collect: "冷却通道排数/列数/每组件数、前移时间、两台机械手单件循环",
+        fields: [
+          num("rows", "冷却通道排数", "排", { req: true }),
+          num("cols", "冷却通道列数", "列", { req: true }),
+          num("grp", "每组件数", "件/组", { def: 6, req: true }),
+          num("fwd", "每组前移运送时间", "秒", { req: true }),
+          num("minStop", "最短停顿时间", "秒", { hint: "设备设定下限，没有可空" }),
+          num("r1", "脱模机械手 单件循环", "秒", { req: true }),
+          num("r2", "检测线上料机械手 单件循环", "秒", { req: true, hint: "→ St.6" }),
+          num("coolReq", "工艺要求最短冷却时间", "秒", { hint: "选填，用于校核冷却是否够" })
+        ] },
+      { id: "det", title: "检测段（夹爪等距移栽 · 同步）",
+        how: "段节拍 = 最慢工位作业 + 移栽；各工位连测 10–20 件取均值。移栽 = 取件+移动+放件+返回。",
+        collect: "夹爪移栽时间、各检测工位作业时间",
+        fields: [num("move", "夹爪移栽时间", "秒/次", { req: true })],
+        table: detTable(6, 5, 10) },
+      { id: "man", title: "人工段（下料 / 目检 / 装箱）",
+        how: "单件时间连测 10 件取均值；周期性动作（拍照、扫码、盖中衬、挪包材）照单次实测填，按每层/每箱自动摊销到每件。",
+        collect: "下料、目检、装箱摆入单件时间；装箱周期动作单次时间；每层件数、每箱层数",
+        fields: [
+          num("unload", "下料(人工搬运) 单件时间", "秒/件", { req: true }),
+          num("visual", "目检 单件时间", "秒/件", { req: true }),
+          ...packFields()
+        ],
+        table: PACK_TABLE },
+      CAP_SEC(N === 6 ? 6 : 1)
+    ],
+    compute: computeCure
+  };
+}
+
+const TYPES = [
+  cureType("cureS", "定子自粘钢固化线", 1, "上料→预压→加热固化(通道并联)→脱模→冷却通道→检测线→人工下料/目检/装箱"),
+  cureType("cureR", "转子自粘钢固化线", 6, "同定子固化线结构，一工装载 6 件（中间隔板）"),
+  {
+    id: "weld", name: "定子焊接线 · 独立检测线", desc: "上料→预压→打码(可选)→焊接→脱模(夹爪入检测线)→同步检测线→人工下料/目检/装箱",
+    sections: [
+      { id: "st", title: "主线工位 St.1–St.5（按工装计）",
+        how: "各工位按【秒/工装】掐表。焊接工站：动作总时间 = 工装到位夹紧→焊完松开（设备动作+焊接，不含流转）；流转 = 工装出站→下一工装到位；焊接次数/单次时间查设备参数。",
+        collect: "上料(人工+拍照+流转)、预压(加压+流转)、打码(可选)、焊接(动作总时间+流转，查焊接次数/单次时间)、脱模(夹爪+空工装转出)",
+        fields: [
+          num("N", "每工装装载件数 N", "件/工装", { def: 1, req: true }),
+          num("s1a", "St.1 人工上料时间", "秒", { req: true }),
+          num("s1b", "St.1 相机拍照时间", "秒"),
+          num("s1c", "St.1 工装流转时间", "秒", { req: true }),
+          num("s2a", "St.2 预压 加压动作时间", "秒", { req: true }),
+          num("s2b", "St.2 预压 设备流转时间", "秒", { req: true }),
+          sel("mk", "St.3 打码工站", [["1", "有"], ["0", "无"]], "1"),
+          num("s3a", "St.3 打码动作时间", "秒"),
+          num("s3b", "St.3 流转动作时间", "秒"),
+          num("wTot", "St.4 焊接 工站动作总时间", "秒", { req: true }),
+          num("wFlow", "St.4 焊接 工装流转时间", "秒", { req: true }),
+          num("wCnt", "St.4 焊接次数", "次"),
+          num("wOne", "St.4 单次焊接时间", "秒"),
+          num("s5a", "St.5 脱模 夹爪取件放入检测线", "秒", { req: true }),
+          num("s5b", "St.5 空工装转出/流转时间", "秒", { req: true })
+        ] },
+      { id: "ring", title: "工装环", optional: true,
+        how: "载具循环 = 五个工位停留 + 工位间倍速链输送 + 空工装回流。工装数不填则不校核工装数约束。",
+        collect: "工位间倍速链输送时间合计、空工装回流时间、现有工装数（选填）",
+        fields: [
+          num("conv", "工位间倍速链输送时间合计", "秒"),
+          num("ret", "空工装回流时间", "秒"),
+          num("tools", "现有工装数", "套")
+        ] },
+      { id: "det", title: "检测段（夹爪等距移栽 · 同步）",
+        how: "段节拍 = 最慢工位作业 + 移栽；快的工位只能空等。移栽 = 取件+移动+放件+返回。",
+        collect: "夹爪移栽时间、各检测工位作业时间",
+        fields: [num("move", "夹爪移栽时间", "秒/次", { req: true })],
+        table: detTable(10, 6, 10) },
+      { id: "man", title: "人工段（下料 / 目检 / 装箱）",
+        how: "单件时间连测 10 件取均值；周期性动作照单次实测填，按每层/每箱自动摊销到每件。",
+        collect: "下料、目检、装箱摆入单件时间；装箱周期动作单次时间；每层件数、每箱层数",
+        fields: [
+          num("unload", "下料(人工搬运) 单件时间", "秒/件", { req: true }),
+          num("visual", "目检 单件时间", "秒/件", { req: true }),
+          ...packFields()
+        ],
+        table: PACK_TABLE },
+      CAP_SEC()
+    ],
+    compute: computeWeld
+  },
+  {
+    id: "ring", name: "定子焊接线 · 带工装流转线", desc: "环线：上料→预压→打码(可选)→焊接→检测工站(工装承载逐站)→下料顶出→空工装回上料；目检桌离线",
+    sections: [
+      { id: "st", title: "环线工位 St.1–St.4（按工装计）",
+        how: "各工位按【秒/工装】掐表。焊接工站：动作总时间 = 工装到位夹紧→焊完松开（不含流转）；焊接次数/单次时间查设备参数。",
+        collect: "上料(人工+拍照+流转)、预压(加压+流转)、打码(可选)、焊接(动作总时间+流转，查焊接次数/单次时间)",
+        fields: [
+          num("N", "每工装装载件数 N", "件/工装", { def: 1, req: true }),
+          num("s1a", "St.1 人工上料时间", "秒", { req: true }),
+          num("s1b", "St.1 相机拍照时间", "秒"),
+          num("s1c", "St.1 工装流转时间", "秒", { req: true }),
+          num("s2a", "St.2 预压 加压动作时间", "秒", { req: true }),
+          num("s2b", "St.2 预压 设备流转时间", "秒", { req: true }),
+          sel("mk", "St.3 打码工站", [["1", "有"], ["0", "无"]], "0"),
+          num("s3a", "St.3 打码动作时间", "秒"),
+          num("s3b", "St.3 流转动作时间", "秒"),
+          num("wTot", "St.4 焊接 工站动作总时间", "秒", { req: true }),
+          num("wFlow", "St.4 焊接 工装流转时间", "秒", { req: true }),
+          num("wCnt", "St.4 焊接次数", "次"),
+          num("wOne", "St.4 单次焊接时间", "秒")
+        ] },
+      { id: "det", title: "检测工站（工装承载 · 逐站独立）",
+        how: "每站节拍 = 检测动作 + 工装流转（非同步）。各站流转留空时取统一值。",
+        collect: "各检测工站检测动作时间、工装流转时间",
+        fields: [num("detFlow", "检测工站 统一工装流转时间", "秒", { hint: "表中流转留空的站取此值" })],
+        table: {
+          k: "det", title: "检测工站", max: 10,
+          rows: Array.from({ length: 10 }, (_, i) => ({ on: i < 2, name: "", t: "", fl: "" })),
+          cols: [
+            { k: "on", label: "启用", type: "chk" },
+            { k: "name", label: "工站名称", type: "text", ph: i => "检测工站" + (i + 1) },
+            { k: "t", label: "检测动作 s", type: "num" },
+            { k: "fl", label: "工装流转 s", type: "num", ph: () => "统一值" }
+          ]
+        } },
+      { id: "unl", title: "St.15 下料工位 + 工装环",
+        how: "零件顶出后人工取走，空工装流向上料。工装环覆盖全部环线工站，工装数最容易成为山积图看不出的隐形瓶颈。",
+        collect: "下料顶出/人工取件/流转时间；整圈倍速链输送时间、现有工装数",
+        fields: [
+          num("u1", "下料 顶出动作时间", "秒"),
+          num("u2", "下料 人工取件时间", "秒", { req: true }),
+          num("u3", "下料 工装流转时间", "秒", { req: true }),
+          num("conv", "工站间倍速链输送时间合计(整圈)", "秒", { hint: "含下料→上料" }),
+          num("tools", "现有工装数", "套", { hint: "不填则不校核工装数约束" })
+        ] },
+      { id: "man", title: "人工段（目检桌：目检 / 装箱）",
+        how: "目检桌离线作业；装箱周期性动作照单次实测填，按每层/每箱摊销到每件。",
+        collect: "目检、装箱摆入单件时间；装箱周期动作单次时间；每层件数、每箱层数",
+        fields: [num("visual", "目检 单件时间", "秒/件", { req: true }), ...packFields()],
+        table: PACK_TABLE },
+      CAP_SEC()
+    ],
+    compute: computeRing
+  },
+  {
+    id: "rinsp", name: "转子检测线", desc: "单列/双列；上料人工投料或冲床连线→同步检测线→下料夹爪(双列合流)→目检→装箱",
+    sections: [
+      { id: "cfg", title: "线体配置与上料",
+        how: "双列 = 两条相同检测线并排，下料合流一个通道、一个夹爪两侧循环抓料。人工投料默认不构成约束；连线时冲床出件节拍 = 每件片数 × 60 ÷ SPM。",
+        collect: "列数、上料方式；连线时记录冲床 SPM 与每件片数",
+        fields: [
+          sel("cols", "线体列数", [["1", "单列"], ["2", "双列"]], "1"),
+          sel("feed", "上料方式", [["1", "人工投料"], ["2", "连线(冲床直供)"]], "1"),
+          num("hand", "人工投料 单件时间", "秒/件", { hint: "选填，校核投料能力时填" }),
+          num("ppl", "投料人数", "人", { def: 1 }),
+          num("spm", "冲床冲速 SPM", "冲次/分", { hint: "连线模式必填" }),
+          num("pcs", "每个零件片数", "片/件", { hint: "连线模式必填" }),
+          sel("press", "冲床配置(双列时)", [["1", "每列各一台"], ["2", "一台供两列"]], "1")
+        ] },
+      { id: "det", title: "检测段（夹爪等距移栽 · 同步；双列只填一列）",
+        how: "按一列填写，双列时系统自动 ÷2 折合整线。段节拍 = 最慢作业 + 移栽。",
+        collect: "夹爪移栽时间、各检测工位作业时间（一列）",
+        fields: [num("move", "夹爪移栽时间", "秒/次", { req: true })],
+        table: detTable(14, 6, 14) },
+      { id: "unl", title: "下料夹爪",
+        how: "双列时夹爪在两侧往返，取两侧平均值。一台夹爪处理整线全部零件，不按列数折算。",
+        collect: "下料夹爪单件循环时间",
+        fields: [num("grip", "下料夹爪 单件循环时间", "秒/件", { req: true })] },
+      { id: "diag", title: "下料口实测诊断（判断瓶颈是否在夹爪）", optional: true,
+        how: "在下料口连续记录 10–20 个出料间隔（相邻两件放入流出通道的时间差）。双列常见 8/12/8/12 交替，属正常。至少 4 个才出诊断。",
+        collect: "下料口连续 10–20 个出料间隔（选填）",
+        fields: [
+          num("exitWait", "单列出口 等待夹爪时间", "秒", { hint: "选填：最后工位做完停在出口等夹爪的平均时间" }),
+          num("thDev", "判定阈值：单列偏差率", "", { def: 0.05 }),
+          num("thUtil", "判定阈值：夹爪满负荷利用率", "", { def: 0.9 })
+        ],
+        table: {
+          k: "gaps", title: "出料间隔", max: 20,
+          rows: Array.from({ length: 10 }, () => ({ t: "" })),
+          rowLabel: i => "第 " + (i + 1) + " 个",
+          cols: [{ k: "t", label: "出料间隔 s", type: "num" }]
+        } },
+      { id: "man", title: "人工段（目检 / 装箱）",
+        how: "没有目检或装箱时选「无」。周期性动作按每层/每箱摊销到每件。",
+        collect: "目检、装箱摆入单件时间；装箱周期动作单次时间；每层件数、每箱层数",
+        fields: [
+          sel("visOn", "目检", [["1", "有"], ["0", "无"]], "1"),
+          num("visual", "目检 单件时间", "秒/件"),
+          sel("packOn", "装箱", [["1", "有"], ["0", "无"]], "1"),
+          num("place", "装箱 摆入箱内 单件时间", "秒/件"),
+          num("perLayer", "每层件数", "件/层"),
+          num("layers", "每箱层数", "层/箱")
+        ],
+        table: PACK_TABLE },
+      CAP_SEC()
+    ],
+    compute: computeRinsp
+  }
+];
+
+/* 分析表现有数据（2026-09《节拍分析表》9.2 区，原样搬入） */
+const CURE_DEMO = {
+  vals: { mode: "2", tm: 970, gapIn: 2, gapOut: 2, load: 120, pre: 50, demold: 117, ret: 95, tools: 34,
+    rows: 3, cols: 16, grp: 6, fwd: 12, r1: 18, r2: 20, coolReq: 600, move: 8,
+    unload: 3, visual: 10, place: 2, perLayer: 17, layers: 40,
+    dem: 18000, use: 1, days: 26, mins: 1320, oee: 0.9, tol: 5 },
+  tabs: {
+    ch: [15, 23.5, 43, 51.5, 71, 79.5, 99, 107.5, 127, 135.5].map((x, i) => ({ on: i < 9, tin: x, tout: x })),
+    det: [["测高", 13.3], ["内径通规", 6.7], ["线槽通规", 11.7], ["打码", 15.6], ["除尘", 14.5], ["", ""]].map((r, i) => ({ on: i < 5, name: r[0], t: r[1] })),
+    pack: [["拍照", 10, "2"], ["扫码", 80, "2"], ["盖中衬", 60, "2"], ["挪动包材", 60, "3"]].map(r => ({ on: true, name: r[0], t: r[1], f: r[2] }))
+  }
+};
+const DEMO = {
+  cureS: CURE_DEMO,
+  cureR: {
+    vals: { ...CURE_DEMO.vals, N: 6, use: 6, tm: 953, r1: 16, r2: 19 },
+    tabs: { ...CURE_DEMO.tabs,
+      det: [["测高", 11], ["内径通规", 6.5], ["线槽通规", 11.5], ["打码", 12.6], ["除尘", 10], ["", ""]].map((r, i) => ({ on: i < 5, name: r[0], t: r[1] })) }
+  }
+};
+
+/* ============ 计算工具 ============ */
+const EPS = 1e-9;
+const sum = a => a.reduce((s, x) => s + x, 0);
+const max = a => a.length ? Math.max(...a) : 0;
+const div = (a, b) => b ? a / b : 0;
+const fmt = (x, d = 1) => (x === null || x === undefined || !isFinite(x)) ? "—" : (+x).toFixed(d).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+const pct = (x, d = 1) => isFinite(x) ? (x * 100).toFixed(d) + "%" : "—";
+
+function reader(state) {
+  const raw = k => state.vals[k];
+  const n = k => { const x = parseFloat(raw(k)); return isFinite(x) ? x : 0; };
+  const has = k => raw(k) !== "" && raw(k) !== undefined && raw(k) !== null && isFinite(parseFloat(raw(k)));
+  const t = k => state.tabs[k] || [];
+  const rn = (r, c) => { const x = parseFloat(r[c]); return isFinite(x) ? x : 0; };
+  return { n, has, s: k => String(raw(k) ?? ""), t, rn };
+}
+
+// 按优先级取最大段：segs 已按 Excel 约束来源判定顺序排列
+function pickSeg(segs) {
+  const LT = max(segs.map(s => s.ct));
+  const seg = LT > 0 ? segs.find(s => Math.abs(s.ct - LT) < EPS) : null;
+  return { LT, seg };
+}
+
+function packing(v) {
+  const perLayer = v.n("perLayer"), perBox = perLayer * v.n("layers");
+  const rows = v.t("pack").map(r => {
+    const t = v.rn(r, "t"), f = String(r.f);
+    const d = f === "3" ? (perBox || 1) : f === "2" ? (perLayer || 1) : 1;
+    return { ...r, per: (r.on && t) ? t / d : 0 };
+  });
+  const periodic = sum(rows.map(r => r.per));
+  return { place: v.n("place"), periodic, ct: v.n("place") + periodic, rows };
+}
+
+function syncDet(v, cols = 1) {
+  const move = v.n("move");
+  const rows = v.t("det").map((r, i) => ({ i, on: !!r.on, name: r.name || "检测工位" + (i + 1), t: v.rn(r, "t") }));
+  const on = rows.filter(r => r.on);
+  const slow = max(on.map(r => r.t));
+  const sync = on.length ? slow + move : 0;
+  on.forEach(r => r.wait = sync - move - r.t);
+  const bal = (on.length && sync) ? (sum(on.map(r => r.t)) + on.length * move) / (on.length * sync) : 0;
+  const slowRow = on.find(r => Math.abs(r.t - slow) < EPS);
+  return { move, rows, on, sync, line: div(sync, cols), waitSum: sum(on.map(r => r.wait)), bal, slowRow };
+}
+
+/* ---------- 固化线 ---------- */
+function computeCure(v, T) {
+  const N = v.n("N"), mode2 = v.s("mode") === "2";
+  const Tch = v.n("tm") > 0 ? v.n("tm") : (mode2 ? Math.max(v.n("t1"), v.n("t2")) : v.n("t1") + v.n("t2"));
+  const ch = v.t("ch").map(r => ({ on: !!r.on, tin: v.rn(r, "tin"), tout: v.rn(r, "tout") }));
+  const nCh = ch.filter(c => c.on).length;
+  const par = (Tch && nCh && N) ? Tch / (nCh * N) : 0;
+  const stay = mode2 ? 2 * Tch : Tch;
+  const feed = div(v.n("gapIn"), N), outg = div(v.n("gapOut"), N);
+  const avgIn = div(sum(ch.filter(c => c.on).map(c => c.tin)), nCh), avgOut = div(sum(ch.filter(c => c.on).map(c => c.tout)), nCh);
+  const maxPass = nCh ? max(ch.filter(c => c.on).map(c => c.tin + stay + c.tout)) : 0;
+  const st1 = div(v.n("load"), N), st2 = div(v.n("pre"), N), st4 = div(v.n("demold"), N);
+  const curePass = nCh ? avgIn + stay + avgOut : 0;
+  const loop = curePass + v.n("load") + v.n("pre") + v.n("demold") + v.n("ret");
+  const tools = v.n("tools");
+  const toolCT = (tools && N) ? loop / (tools * N) : 0;
+  const cureCT = Math.max(par, feed, outg, toolCT);
+  const cureSrc = !cureCT ? "待录入" : cureCT === toolCT ? "工装数量" : cureCT === par ? "并联通道" : cureCT === feed ? "进料主通道" : "出料主通道";
+  // 冷却
+  const cap = v.n("rows") * v.n("cols"), grp = v.n("grp");
+  const idx = grp ? Math.max(v.n("minStop"), grp * Math.max(v.n("r1"), v.n("r2"))) + v.n("fwd") : 0;
+  const mech = div(idx, grp), proc = div(v.n("coolReq"), cap);
+  const coolCT = Math.max(mech, proc);
+  const det = syncDet(v);
+  const pk = packing(v);
+  const manCT = Math.max(v.n("unload"), v.n("visual"), pk.ct);
+
+  const stations = [
+    { name: "St.1 上料工位" + (N > 1 ? "(" + N + "件/工装)" : ""), work: st1 },
+    { name: "St.2 预压工位", work: st2 },
+    { name: "St.3 加热固化(通道并联)", work: cureCT },
+    { name: "St.4 脱模(机械手)", work: st4 },
+    { name: "St.5 冷却通道", work: coolCT },
+    { name: "St.6 检测线上料(机械手)", work: v.n("r2") }
+  ];
+  const detIdx = {};
+  det.rows.forEach((r, i) => { if (r.on) { detIdx[i] = stations.length; stations.push({ name: "St." + (7 + i) + " " + r.name, work: r.t, move: det.move }); } });
+  const sUnl = stations.push({ name: "下料(人工搬运)", work: v.n("unload") }) - 1;
+  const sVis = stations.push({ name: "目检", work: v.n("visual") }) - 1;
+  const sPack = stations.push({ name: "装箱", work: pk.place, per: pk.periodic }) - 1;
+  renumber(stations, 7 + det.rows.length);
+
+  const lpd = Math.max(st1, st2, st4);
+  const lpdSt = lpd === st1 ? 0 : lpd === st4 ? 3 : 1;
+  const manSt = manCT === v.n("unload") ? sUnl : manCT === v.n("visual") ? sVis : sPack;
+  const segs = [
+    { name: "固化段", ct: cureCT, detail: "约束：" + cureSrc + "；并联 " + fmt(par, 2) + " = T_ch " + fmt(Tch) + " ÷ (" + nCh + " 通道 × " + N + ")", st: 2, hint: cureSrc === "工装数量" ? "增加工装或压缩载具循环" : "加开通道 / 缩短固化周期 / 提主通道速度" },
+    { name: "检测段同步节拍", ct: det.sync, detail: "最慢 " + (det.slowRow ? det.slowRow.name : "—") + " " + fmt(det.slowRow ? det.slowRow.t : 0) + " + 移栽 " + fmt(det.move), st: det.slowRow ? detIdx[det.slowRow.i] : null, hint: "拆分最慢工位或缩短移栽" },
+    { name: "冷却段", ct: coolCT, detail: "机械 " + fmt(mech, 2) + " / 工艺约束 " + fmt(proc, 2) + "；索引周期 " + fmt(idx) + " s/组", st: 4, hint: "加排数或缩短停顿/前移，提机械手速度" },
+    { name: "人工段", ct: manCT, detail: "下料 " + fmt(v.n("unload")) + " / 目检 " + fmt(v.n("visual")) + " / 装箱 " + fmt(pk.ct, 2), st: manSt, hint: "加人手或改自动化" },
+    { name: "上料/预压/脱模", ct: lpd, detail: "上料 " + fmt(st1, 2) + " / 预压 " + fmt(st2, 2) + " / 脱模 " + fmt(st4, 2) + "（秒/件）", st: lpdSt, hint: "针对该工位改善" }
+  ];
+  const { LT, seg } = pickSeg(segs);
+  const actualCool = cap * LT;
+  const checks = [
+    { label: "通道占用周期 T_ch / 在用通道", value: fmt(Tch) + " s/工装 · " + nCh + " 通道" },
+    { label: "并联组等效节拍", value: fmt(par, 2) + " s/件" },
+    { label: "通道内在制品", value: fmt((mode2 ? 2 : 1) * nCh * N, 0) + " 件" },
+    { label: "最远通道通过时间", value: maxPass ? fmt(maxPass, 0) + " s" : "未填输送时间" },
+    { label: "载具循环时间", value: fmt(loop, 0) + " s/工装" },
+    { label: "工装数决定的最小节拍", value: tools ? fmt(toolCT, 2) + " s/件（" + tools + " 套）" : "未填工装数，不校核" },
+    { label: "冷却通道容量 / 实际冷却时间", value: cap + " 件 / " + fmt(actualCool, 0) + " s" },
+    { label: "冷却时间校核", value: !v.n("coolReq") ? "未填工艺要求" : actualCool >= v.n("coolReq") ? "OK（要求 " + fmt(v.n("coolReq")) + " s）" : "NG 冷却时间不足（要求 " + fmt(v.n("coolReq")) + " s）",
+      level: !v.n("coolReq") ? "info" : actualCool >= v.n("coolReq") ? "ok" : "ng" },
+    { label: "检测段等待损失合计 / 平衡率", value: fmt(det.waitSum) + " s · " + pct(det.bal) }
+  ];
+  const capChecks = c => {
+    const chMin = (c.target && Tch && N) ? Math.ceil(Tch / (N * c.target)) : 0;
+    const toolMin = (c.target && N && loop) ? Math.ceil(loop / (c.target * N)) : 0;
+    return [
+      { label: "所需最少通道数 / 在用", value: chMin + " / " + nCh + "（余量 " + (nCh - chMin) + "）", level: nCh >= chMin ? "ok" : "ng" },
+      { label: "最少需要工装数 / 现有", value: toolMin + " / " + (tools || "未填") + (tools ? "（余量 " + (tools - toolMin) + "）" : ""), level: !tools ? "info" : tools >= toolMin ? "ok" : "ng" },
+      { label: "每小时工装流转数", value: fmt(div(3600, LT * N), 1) + " 工装/小时" }
+    ];
+  };
+  return { N, stations, segs, LT, seg, checks, capChecks, title: T.name };
+}
+
+function renumber(stations, next) {
+  // 检测工位之后的人工工位按预留工位数接续编号（与分析表主表一致，停用的检测位也占号）
+  stations.forEach(s => { if (!/^St\./.test(s.name)) s.name = "St." + (next++) + " " + s.name; });
+}
+
+/* ---------- 焊接线公共：St.1–St.4 ---------- */
+function weldHead(v) {
+  const N = v.n("N"), mk = v.s("mk") === "1";
+  const c1 = v.n("s1a") + v.n("s1b") + v.n("s1c");
+  const c2 = v.n("s2a") + v.n("s2b");
+  const c3 = mk ? v.n("s3a") + v.n("s3b") : 0;
+  const c4 = v.n("wTot") + v.n("wFlow");
+  const stations = [
+    { name: "St.1 上料工位(人工+拍照)", work: div(v.n("s1a") + v.n("s1b"), N), move: div(v.n("s1c"), N) },
+    { name: "St.2 预压工位", work: div(v.n("s2a"), N), move: div(v.n("s2b"), N) }
+  ];
+  if (mk) stations.push({ name: "St.3 打码工站", work: div(v.n("s3a"), N), move: div(v.n("s3b"), N) });
+  stations.push({ name: "St.4 焊接工站", work: div(v.n("wTot"), N), move: div(v.n("wFlow"), N) });
+  const weldSum = v.n("wCnt") * v.n("wOne");
+  const nonWeld = v.n("wTot") ? v.n("wTot") - weldSum : 0;
+  const weldChecks = [
+    { label: "焊接总时间 = 次数 × 单次", value: fmt(weldSum) + " s（" + fmt(v.n("wCnt"), 0) + " × " + fmt(v.n("wOne"), 2) + "）" },
+    { label: "设备非焊接动作时间", value: fmt(nonWeld) + " s", level: nonWeld < 0 ? "ng" : "info" },
+    { label: "焊接数据校核", value: !v.n("wTot") ? "待录入" : !weldSum ? "未填焊接次数/单次时间" : nonWeld < 0 ? "NG 焊接总时间大于动作总时间，请核对" : "OK（焊接占动作 " + pct(div(weldSum, v.n("wTot"))) + "）",
+      level: !weldSum ? "info" : nonWeld < 0 ? "ng" : "ok" }
+  ];
+  const weldCap = c => {
+    if (!weldSum) return [{ label: "焊接反算", value: "填写焊接次数与单次时间后显示", level: "info" }];
+    const fixed = v.n("wFlow") + Math.max(0, nonWeld);
+    const avail = c.target * N - fixed;
+    const cnt = (v.n("wOne") && avail > 0) ? Math.floor(avail / v.n("wOne")) : 0;
+    const one = (v.n("wCnt") && avail > 0) ? avail / v.n("wCnt") : 0;
+    const st4 = div(c4, N);
+    const verdict = nonWeld < 0 ? ["数据矛盾，先核对", "ng"] : avail <= 0 ? ["NG 固定开销已超目标节拍，焊接无时间可用", "ng"] : st4 <= c.target ? ["OK", "ok"] : ["NG 焊接时间超出，需减少焊点或缩短单次焊接", "ng"];
+    return [
+      { label: "焊接固定开销(流转+非焊接动作)", value: fmt(fixed) + " s/工装" },
+      { label: "目标节拍下可用于焊接的时间", value: fmt(avail, 2) + " s" },
+      { label: "最大允许焊接次数 / 单次上限", value: cnt + " 次 / " + fmt(one, 2) + " s（现 " + fmt(v.n("wCnt"), 0) + " 次 × " + fmt(v.n("wOne"), 2) + " s）", level: (v.n("wCnt") <= cnt) ? "ok" : "ng" },
+      { label: "焊接工站判定", value: verdict[0], level: verdict[1] }
+    ];
+  };
+  return { N, mk, c1, c2, c3, c4, stations, weldChecks, weldCap };
+}
+
+function headBottleneck(h, extra) {
+  // 按分析表判定顺序：焊接 > (检测) > 上料 > (脱模/下料) > 预压 > 打码
+  const N = h.N;
+  const list = [["焊接工站", div(h.c4, N)], ...extra.pre, ["上料工位", div(h.c1, N)], ...extra.post, ["预压工位", div(h.c2, N)], ["打码工站", div(h.c3, N)]];
+  const m = max(list.map(x => x[1]));
+  const hit = list.find(x => Math.abs(x[1] - m) < EPS);
+  return { ct: m, name: m ? hit[0] : "待录入" };
+}
+
+/* ---------- 焊接线 · 独立检测线 ---------- */
+function computeWeld(v, T) {
+  const h = weldHead(v), N = h.N;
+  const c5 = v.n("s5a") + v.n("s5b");
+  const stations = h.stations.slice();
+  stations.push({ name: "St.5 脱模(夹爪入检测线)", work: div(v.n("s5a"), N), move: div(v.n("s5b"), N) });
+  const det = syncDet(v);
+  const detIdx = {};
+  det.rows.forEach((r, i) => { if (r.on) { detIdx[i] = stations.length; stations.push({ name: "St." + (6 + i) + " " + r.name, work: r.t, move: det.move }); } });
+  const pk = packing(v);
+  const sUnl = stations.push({ name: "下料(人工搬运)", work: v.n("unload") }) - 1;
+  const sVis = stations.push({ name: "目检", work: v.n("visual") }) - 1;
+  const sPack = stations.push({ name: "装箱", work: pk.place, per: pk.periodic }) - 1;
+  renumber(stations, 6 + det.rows.length);
+
+  const main = headBottleneck(h, { pre: [], post: [["脱模工位", div(c5, N)]] });
+  const nameToSt = n => stations.findIndex(s => s.name.indexOf(n.replace("工位", "").replace("工站", "")) >= 0);
+  const loop = h.c1 + h.c2 + h.c3 + h.c4 + c5 + v.n("conv") + v.n("ret");
+  const tools = v.n("tools");
+  const toolCT = (tools && N) ? loop / (tools * N) : 0;
+  const manCT = Math.max(v.n("unload"), v.n("visual"), pk.ct);
+  const manSt = manCT === v.n("unload") ? sUnl : manCT === v.n("visual") ? sVis : sPack;
+  const segs = [
+    { name: "工装数约束", ct: toolCT, detail: tools ? "载具循环 " + fmt(loop, 0) + " s ÷ (" + tools + " 套 × " + N + ")" : "未填工装数", st: null, hint: "增加工装或压缩载具循环（山积图看不出）" },
+    { name: "检测段同步节拍", ct: det.sync, detail: "最慢 " + (det.slowRow ? det.slowRow.name : "—") + " " + fmt(det.slowRow ? det.slowRow.t : 0) + " + 移栽 " + fmt(det.move), st: det.slowRow ? detIdx[det.slowRow.i] : null, hint: "拆分最慢工位或缩短移栽" },
+    { name: "主线工位 St.1–St.5", ct: main.ct, detail: "瓶颈：" + main.name, st: nameToSt(main.name), hint: main.name === "焊接工站" ? "减少焊点/缩短单次焊接，或压缩流转与设备动作" : "针对该工位改善" },
+    { name: "人工段", ct: manCT, detail: "下料 " + fmt(v.n("unload")) + " / 目检 " + fmt(v.n("visual")) + " / 装箱 " + fmt(pk.ct, 2), st: manSt, hint: "加人手或改自动化" }
+  ];
+  const { LT, seg } = pickSeg(segs);
+  const checks = [
+    ...h.weldChecks,
+    { label: "载具循环时间", value: fmt(loop, 0) + " s/工装" },
+    { label: "工装数决定的最小节拍", value: tools ? fmt(toolCT, 2) + " s/件（" + tools + " 套）" : "未填工装数，不校核" },
+    { label: "检测段等待损失合计 / 平衡率", value: fmt(det.waitSum) + " s · " + pct(det.bal) }
+  ];
+  const capChecks = c => {
+    const toolMin = (c.target && N && loop) ? Math.ceil(loop / (c.target * N)) : 0;
+    return [...h.weldCap(c),
+      { label: "最少需要工装数 / 现有", value: toolMin + " / " + (tools || "未填") + (tools ? "（余量 " + (tools - toolMin) + "）" : ""), level: !tools ? "info" : tools >= toolMin ? "ok" : "ng" }];
+  };
+  return { N, stations, segs, LT, seg, checks, capChecks, title: T.name };
+}
+
+/* ---------- 焊接线 · 带工装流转线 ---------- */
+function computeRing(v, T) {
+  const h = weldHead(v), N = h.N;
+  const stations = h.stations.slice();
+  const flowDef = v.n("detFlow");
+  const rows = v.t("det").map((r, i) => {
+    const fl = (r.fl === "" || r.fl === undefined || r.fl === null) ? flowDef : v.rn(r, "fl");
+    const t = v.rn(r, "t");
+    return { i, on: !!r.on, name: r.name || "检测工站" + (i + 1), t, fl, ct: t + fl };
+  });
+  const on = rows.filter(r => r.on);
+  const detIdx = {};
+  rows.forEach(r => { if (r.on) { detIdx[r.i] = stations.length; stations.push({ name: "St." + (5 + r.i) + " " + r.name, work: div(r.t, N), move: div(r.fl, N) }); } });
+  const c15 = v.n("u1") + v.n("u2") + v.n("u3");
+  const sUnl = stations.push({ name: "St.15 下料工位(顶出+人工取件)", work: div(v.n("u1") + v.n("u2"), N), move: div(v.n("u3"), N) }) - 1;
+  const pk = packing(v);
+  const sVis = stations.push({ name: "St.16 目检", work: v.n("visual") }) - 1;
+  const sPack = stations.push({ name: "St.17 装箱", work: pk.place, per: pk.periodic }) - 1;
+
+  const detMax = max(on.map(r => r.ct));
+  const slow = on.find(r => Math.abs(r.ct - detMax) < EPS);
+  const ring = headBottleneck(h, { pre: [["检测 · " + (slow ? slow.name : ""), div(detMax, N)]], post: [["下料工位", div(c15, N)]] });
+  const ringSt = ring.name.startsWith("检测") ? (slow ? detIdx[slow.i] : null) : ring.name === "下料工位" ? sUnl
+    : stations.findIndex(s => s.name.indexOf(ring.name.replace("工位", "").replace("工站", "")) >= 0);
+  const loop = h.c1 + h.c2 + h.c3 + h.c4 + sum(on.map(r => r.ct)) + c15 + v.n("conv");
+  const tools = v.n("tools");
+  const toolCT = (tools && N) ? loop / (tools * N) : 0;
+  const manCT = Math.max(v.n("visual"), pk.ct);
+  const segs = [
+    { name: "工装数约束", ct: toolCT, detail: tools ? "载具循环 " + fmt(loop, 1) + " s ÷ (" + tools + " 套 × " + N + ")" : "未填工装数", st: null, hint: "增加工装或压缩载具循环（山积图看不出）" },
+    { name: "环线工站 St.1–St.15", ct: ring.ct, detail: "瓶颈：" + ring.name, st: ringSt, hint: ring.name === "焊接工站" ? "减少焊点/缩短单次焊接，或压缩流转与设备动作" : "针对该工站改善" },
+    { name: "人工段(目检桌)", ct: manCT, detail: "目检 " + fmt(v.n("visual")) + " / 装箱 " + fmt(pk.ct, 2), st: manCT === v.n("visual") ? sVis : sPack, hint: "加人或改自动化" }
+  ];
+  const { LT, seg } = pickSeg(segs);
+  const checks = [
+    ...h.weldChecks,
+    { label: "载具循环时间", value: fmt(loop, 1) + " s/工装" },
+    { label: "工装数决定的最小节拍", value: tools ? fmt(toolCT, 2) + " s/件（" + tools + " 套）" : "未填工装数，不校核", level: tools && seg && seg.name === "工装数约束" ? "ng" : undefined },
+    ...on.map(r => ({ label: "检测 " + r.name + " 空闲时间", value: fmt(LT * N - r.ct, 2) + " s（站节拍 " + fmt(r.ct, 2) + "）" }))
+  ];
+  const capChecks = c => {
+    const toolMin = (c.target && N && loop) ? Math.ceil(loop / (c.target * N)) : 0;
+    return [...h.weldCap(c),
+      { label: "最少需要工装数 / 现有", value: toolMin + " / " + (tools || "未填") + (tools ? "（余量 " + (tools - toolMin) + "）" : ""), level: !tools ? "info" : tools >= toolMin ? "ok" : "ng" }];
+  };
+  return { N, stations, segs, LT, seg, checks, capChecks, title: T.name };
+}
+
+/* ---------- 转子检测线 ---------- */
+function computeRinsp(v, T) {
+  const cols = v.s("cols") === "2" ? 2 : 1, press = v.s("feed") === "2";
+  const pressCT = v.n("spm") ? v.n("pcs") * 60 / v.n("spm") : 0;
+  const nPress = cols === 2 ? (v.s("press") === "1" ? 2 : 1) : 1;
+  const load = press ? div(pressCT, nPress) : ((v.n("hand") && v.n("ppl")) ? v.n("hand") / v.n("ppl") : 0);
+  const det = syncDet(v, cols);
+  const grip = v.n("grip");
+  const visOn = v.s("visOn") === "1", packOn = v.s("packOn") === "1";
+  const pk = packing(v);
+  const packCT = packOn ? pk.ct : 0;
+  const manCT = Math.max(visOn ? v.n("visual") : 0, packCT);
+
+  const stations = [{ name: "St.1 上料(" + (press ? "冲床连线" : "人工投料") + ")", work: load }];
+  const detIdx = {};
+  det.rows.forEach((r, i) => { if (r.on) { detIdx[i] = stations.length; stations.push({ name: "St." + (2 + i) + " " + r.name, work: r.t / cols, move: det.move / cols }); } });
+  const sGrip = stations.push({ name: "St.16 下料(夹爪" + (cols === 2 ? "合流" : "") + ")", work: grip }) - 1;
+  const sVis = visOn ? stations.push({ name: "St.17 目检", work: v.n("visual") }) - 1 : -1;
+  const sPack = packOn ? stations.push({ name: "St.18 装箱", work: pk.place, per: pk.periodic }) - 1 : -1;
+
+  const segs = [
+    { name: "检测段(折合整线)", ct: det.line, detail: "单列 " + fmt(det.sync, 2) + "（最慢 " + (det.slowRow ? det.slowRow.name + " " + fmt(det.slowRow.t) : "—") + " + 移栽 " + fmt(det.move) + "）÷ " + cols + " 列", st: det.slowRow ? detIdx[det.slowRow.i] : null, hint: cols === 1 ? "拆分最慢工位或缩短移栽，可考虑改双列" : "拆分最慢工位或缩短移栽" },
+    { name: "下料夹爪", ct: grip, detail: "一台夹爪处理整线全部零件，不按列数折算", st: sGrip, hint: "夹爪提速或改双夹爪" },
+    { name: press ? "冲床供料" : "人工投料", ct: load, detail: press ? "冲床 " + fmt(pressCT, 2) + " s/件 × " + nPress + " 台" : (load ? v.n("ppl") + " 人校核" : "供料充足，不构成约束"), st: 0, hint: press ? "提 SPM 或双冲床" : "加投料人员" },
+    { name: "人工段", ct: manCT, detail: "目检 " + (visOn ? fmt(v.n("visual")) : "无") + " / 装箱 " + (packOn ? fmt(pk.ct, 2) : "无"), st: manCT === (visOn ? v.n("visual") : -1) ? sVis : sPack, hint: "加人或改自动化" }
+  ];
+  const { LT, seg } = pickSeg(segs);
+  const checks = [
+    { label: "线体配置", value: cols === 2 ? "双列：检测段产能×2，下料夹爪仍为 1 台" : "单列" },
+    { label: "夹爪能否跟上检测段", value: (!grip || !det.line) ? "待录入" : grip <= det.line ? "OK 夹爪余量 " + fmt(det.line - grip) + " s/件" : "NG 夹爪成为瓶颈" + (cols === 2 ? "，双列产能被下料吃掉" : ""),
+      level: (!grip || !det.line) ? "info" : grip <= det.line ? "ok" : "ng" },
+    { label: "夹爪负荷率", value: pct(div(grip, LT)) },
+    { label: "检测段等待损失合计(每列) / 平衡率", value: fmt(det.waitSum) + " s · " + pct(det.bal) }
+  ];
+  if (press) checks.push({ label: "冲床与检测线匹配度", value: pct(div(load, LT)), level: Math.abs(div(load, LT) - 1) < EPS ? "ng" : "info" });
+  // 下料口实测诊断
+  const gaps = v.t("gaps").map(r => parseFloat(r.t)).filter(x => isFinite(x));
+  const diag = [];
+  if (gaps.length) {
+    const avg = sum(gaps) / gaps.length, mn = Math.min(...gaps), mx = Math.max(...gaps);
+    const single = avg * cols, theory = det.sync;
+    const dev = (theory && single) ? single / theory - 1 : 0;
+    const util = avg ? (grip > 0 ? grip : mn) / avg : 0;
+    const thD = v.has("thDev") ? v.n("thDev") : 0.05, thU = v.has("thUtil") ? v.n("thUtil") : 0.9;
+    let concl, lv;
+    if (gaps.length < 4) { concl = "待录入：至少记录 4 个出料间隔"; lv = "info"; }
+    else if (dev < -thD) { concl = "实测快于理论：检测工位标准时间偏保守，建议复测"; lv = "warn"; }
+    else if (dev <= thD && util < thU) { concl = "检测段是瓶颈，下料夹爪不受影响（夹爪余量约 " + Math.round((1 - util) * 100) + "%）"; lv = "ok"; }
+    else if (dev <= thD && util >= thU) { concl = "临界：线体仍按检测段节拍运行，但夹爪已接近满负荷，没有余量"; lv = "warn"; }
+    else if (util >= thU) { concl = "下料夹爪是瓶颈：夹爪满负荷，每列被拖慢约 " + fmt(single - theory) + " 秒/件"; lv = "ng"; }
+    else { concl = "线体变慢但夹爪未满负荷：瓶颈不在夹爪，查检测工位实测节拍 / 短停 / 上料"; lv = "warn"; }
+    diag.push(
+      { label: "有效记录 / 平均 / 最小 / 最大间隔", value: gaps.length + " 个 · " + fmt(avg, 2) + " / " + fmt(mn, 2) + " / " + fmt(mx, 2) + " s" },
+      { label: "单列实测节拍 vs 理论", value: fmt(single, 2) + " vs " + fmt(theory, 2) + " s（偏差 " + pct(dev) + "）" },
+      { label: "夹爪利用率" + (grip > 0 ? "" : "（以最小间隔估上限）"), value: pct(util) },
+      { label: "诊断结论", value: concl, level: lv }
+    );
+    if (v.has("exitWait")) diag.push({ label: "出口堵料佐证", value: v.n("exitWait") > 1 ? "出口有堵料 → 支持夹爪瓶颈" : "出口基本不等 → 支持夹爪非瓶颈" });
+    if (cols === 2 && gaps.length >= 2) {
+      const pairs = []; for (let i = 0; i + 1 < gaps.length; i += 2) pairs.push(gaps[i] + gaps[i + 1]);
+      diag.push({ label: "相邻两件之和（≈单列实测节拍）", value: pairs.map(x => fmt(x, 1)).join(" / ") });
+    }
+  }
+  return { N: 1, stations, segs, LT, seg, checks, diag, capChecks: null, title: T.name + (cols === 2 ? "（双列）" : "（单列）") };
+}
+
+/* ============ 状态 / 存储 ============ */
+let TYPE = null, STATE = null;
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
+};
+function blankState(T) {
+  const s = { vals: {}, tabs: {} };
+  T.sections.forEach(sec => {
+    sec.fields.forEach(f => s.vals[f.k] = f.def !== undefined ? String(f.def) : "");
+    if (sec.table) s.tabs[sec.table.k] = sec.table.rows.map(r => ({ ...r }));
+  });
+  return s;
+}
+function loadState(T) {
+  const saved = store.get("lsx-takt-" + T.id);
+  const s = blankState(T);
+  if (saved && saved.vals) { Object.assign(s.vals, saved.vals); Object.assign(s.tabs, saved.tabs || {}); }
+  return s;
+}
+const save = () => store.set("lsx-takt-" + TYPE.id, STATE);
+
+/* ============ 渲染：选择与表单 ============ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function renderTypes() {
+  $("#types").innerHTML = TYPES.map(T => `<button class="type${TYPE && TYPE.id === T.id ? " on" : ""}" data-id="${T.id}"><b>${T.name}</b><span>${T.desc}</span></button>`).join("");
+  document.querySelectorAll(".type").forEach(b => b.onclick = () => pickType(b.dataset.id));
+}
+
+function pickType(id) {
+  TYPE = TYPES.find(t => t.id === id);
+  STATE = loadState(TYPE);
+  store.set("lsx-takt-last", id);
+  renderTypes();
+  renderForm();
+  $("#out").classList.add("hidden");
+  $("#form").classList.remove("hidden");
+  $("#demo").classList.toggle("hidden", !DEMO[id]);
+  $("#form").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function fieldHTML(f) {
+  const val = STATE.vals[f.k] ?? "";
+  let input;
+  if (f.type === "sel") input = `<select data-k="${f.k}">${f.options.map(o => `<option value="${o[0]}"${String(val) === o[0] ? " selected" : ""}>${o[1]}</option>`).join("")}</select>`;
+  else input = `<input type="number" inputmode="decimal" step="any" data-k="${f.k}" value="${esc(val)}">`;
+  return `<div class="f"><label>${f.label}${f.unit ? ` <i>[${f.unit}]</i>` : ""}${f.req ? '<span class="star">*</span>' : ""}</label>${input}${f.hint ? `<div class="hint">${f.hint}</div>` : ""}</div>`;
+}
+
+function tableHTML(tb) {
+  const rows = STATE.tabs[tb.k];
+  const head = `<tr>${tb.rowLabel || tb.k !== "pack" ? "<th>#</th>" : "<th>序号</th>"}${tb.cols.map(c => `<th>${c.label}</th>`).join("")}</tr>`;
+  const body = rows.map((r, i) => `<tr><td>${tb.rowLabel ? tb.rowLabel(i) : i + 1}</td>${tb.cols.map(c => {
+    const v = r[c.k];
+    const a = `data-t="${tb.k}" data-r="${i}" data-c="${c.k}"`;
+    if (c.type === "chk") return `<td class="c"><input type="checkbox" ${a}${v ? " checked" : ""}></td>`;
+    if (c.type === "sel") return `<td><select ${a}>${c.options.map(o => `<option value="${o[0]}"${String(v) === o[0] ? " selected" : ""}>${o[1]}</option>`).join("")}</select></td>`;
+    const ph = c.ph ? ` placeholder="${esc(c.ph(i))}"` : "";
+    if (c.type === "text") return `<td><input type="text" ${a} value="${esc(v)}"${ph}></td>`;
+    return `<td><input type="number" inputmode="decimal" step="any" ${a} value="${esc(v)}"${ph}></td>`;
+  }).join("")}</tr>`).join("");
+  const add = rows.length < tb.max ? `<button class="b sm noprint" data-add="${tb.k}">＋ 添加一行</button>` : "";
+  return `<div class="tbl-wrap"><div class="sub" style="margin-bottom:4px">${tb.title}</div><table class="in">${head}${body}</table></div><div style="margin-top:6px">${add}</div>`;
+}
+
+function renderForm() {
+  $("#formTitle").textContent = "· " + TYPE.name;
+  const req = TYPE.sections.filter(s => !s.optional && s.id !== "cap");
+  const opt = TYPE.sections.filter(s => s.optional || s.id === "cap");
+  $("#collect").innerHTML = `<b>现场采集清单</b>（带 * 为必填；各工位连测 10–20 件取均值）<ol>${req.map(s => `<li>${s.collect || s.title}</li>`).join("")}</ol>
+    <div style="margin-top:6px"><b>选填</b>：${opt.map(s => s.collect || s.title).join("；")}</div>`;
+  $("#secs").innerHTML = TYPE.sections.map(sec => `
+    <details class="sec" data-sec="${sec.id}"${sec.optional ? "" : " open"}>
+      <summary>${sec.title}<span class="tag ${sec.optional ? "opt" : "req"}">${sec.optional ? "选填" : "必填"}</span></summary>
+      <div class="sec-body">
+        <p class="how">${sec.how}</p>
+        <div class="grid">${sec.fields.map(fieldHTML).join("")}</div>
+        ${sec.table ? tableHTML(sec.table) : ""}
+      </div>
+    </details>`).join("");
+  bindForm();
+}
+
+function bindForm() {
+  $("#secs").querySelectorAll("[data-k]").forEach(el => el.oninput = el.onchange = () => {
+    STATE.vals[el.dataset.k] = el.value; el.classList.remove("bad"); save();
+  });
+  $("#secs").querySelectorAll("[data-t]").forEach(el => el.oninput = el.onchange = () => {
+    const row = STATE.tabs[el.dataset.t][+el.dataset.r];
+    row[el.dataset.c] = el.type === "checkbox" ? el.checked : el.value; save();
+  });
+  $("#secs").querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
+    const tb = TYPE.sections.map(s => s.table).find(t => t && t.k === b.dataset.add);
+    const tpl = {}; tb.cols.forEach(c => tpl[c.k] = c.type === "chk" ? true : c.type === "sel" ? c.options[0][0] : "");
+    STATE.tabs[tb.k].push(tpl); save();
+    const openIds = [...document.querySelectorAll("details.sec[open]")].map(d => d.dataset.sec);
+    renderForm();
+    document.querySelectorAll("details.sec").forEach(d => d.open = openIds.includes(d.dataset.sec));
+  });
+}
+
+function validate() {
+  const miss = [];
+  document.querySelectorAll("input.bad").forEach(e => e.classList.remove("bad"));
+  TYPE.sections.forEach(sec => sec.fields.forEach(f => {
+    if (!f.req) return;
+    if (TYPE.id === "rinsp") return;
+    const v = STATE.vals[f.k];
+    if (v === "" || v === undefined || !isFinite(parseFloat(v))) {
+      miss.push(f.label);
+      const el = document.querySelector(`[data-k="${f.k}"]`);
+      if (el) { el.classList.add("bad"); el.closest("details").open = true; }
+    }
+  }));
+  if (TYPE.id === "rinsp") {
+    const chk = [["move", "夹爪移栽时间"], ["grip", "下料夹爪单件循环时间"]];
+    if (STATE.vals.feed === "2") chk.push(["spm", "冲床冲速 SPM"], ["pcs", "每个零件片数"]);
+    if (STATE.vals.visOn === "1") chk.push(["visual", "目检单件时间"]);
+    if (STATE.vals.packOn === "1") chk.push(["place", "装箱摆入单件时间"]);
+    chk.forEach(([k, l]) => {
+      const v = STATE.vals[k];
+      if (v === "" || v === undefined || !isFinite(parseFloat(v))) {
+        miss.push(l); const el = document.querySelector(`[data-k="${k}"]`); if (el) { el.classList.add("bad"); el.closest("details").open = true; }
+      }
+    });
+  }
+  const det = STATE.tabs.det || [];
+  const onDet = det.filter(r => r.on);
+  if (!onDet.length) miss.push("至少启用一个检测工位");
+  else if (onDet.some(r => r.t === "" || !isFinite(parseFloat(r.t)))) miss.push("已启用检测工位的作业时间");
+  if (TYPE.id.startsWith("cure") && !(parseFloat(STATE.vals.tm) > 0 || parseFloat(STATE.vals.t1) > 0)) miss.push("通道占用周期（实测值或通道内工位时间）");
+  return miss;
+}
+
+/* ============ 结果 ============ */
+function capacity(v, LT) {
+  if (!(v.n("dem") > 0)) return null;
+  const pcs = v.n("dem") * (v.n("use") || 1), days = v.n("days"), mins = v.n("mins"), oee = v.n("oee");
+  const TT = div(days * mins * 60, pcs), target = TT * oee;
+  const DT = div(LT, oee);
+  const month = LT ? mins * 60 / LT * oee * days : 0;
+  return { pcs, days, mins, oee, tol: v.n("tol"), TT, target, DT, month, gap: month - pcs, daily: div(mins * 60, DT), dailyDem: div(pcs, days),
+    jph: div(3600, DT), margin: div(month, pcs) - 1, ok: LT <= target + EPS };
+}
+
+function niceMax(x) {
+  if (x <= 0) return 10;
+  const p = Math.pow(10, Math.floor(Math.log10(x))), m = x / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+}
+
+function chartSVG(R, cap) {
+  const st = R.stations, n = st.length;
+  const slot = Math.max(44, Math.min(70, 860 / n));
+  const padL = 46, padR = 130, padT = 22, padB = 128;
+  const plotW = slot * n, W = padL + plotW + padR, H = 400, plotH = H - padT - padB;
+  const lines = [{ v: R.LT, c: "var(--lt)", dash: "6 4", name: "线体节拍 LT" }];
+  if (cap) {
+    lines.push({ v: cap.TT, c: "var(--tt)", dash: "", name: "客户节拍 TT" });
+    lines.push({ v: cap.target, c: "var(--target)", dash: "", name: "目标 TT×OEE" });
+    lines.push({ v: cap.DT, c: "var(--dt)", dash: "2 3", name: "交付节拍 DT" });
+  }
+  const tops = st.map(s => s.ct);
+  const yMax = niceMax(max([...tops, ...lines.map(l => l.v)]) * 1.08);
+  const y = val => padT + plotH - val / yMax * plotH;
+  let g = "";
+  for (let i = 0; i <= 5; i++) {
+    const val = yMax / 5 * i, yy = y(val);
+    g += `<line x1="${padL}" x2="${padL + plotW}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>`;
+    g += `<text x="${padL - 6}" y="${yy + 4}" text-anchor="end" font-size="11" fill="var(--ink2)">${fmt(val, val < 10 ? 1 : 0)}</text>`;
+  }
+  g += `<text x="12" y="${padT + plotH / 2}" font-size="11" fill="var(--ink2)" transform="rotate(-90 12 ${padT + plotH / 2})" text-anchor="middle">秒/件</text>`;
+  const bw = Math.min(34, slot * 0.62);
+  st.forEach((s, i) => {
+    const cx = padL + slot * i + slot / 2, x0 = cx - bw / 2;
+    let base = 0;
+    const hi = i === R.hiSt;
+    [[s.work, hi ? "var(--c-hi)" : "var(--c-work)"], [s.move, "var(--c-move)"], [s.per, "var(--c-per)"]].forEach(([val, col]) => {
+      if (!val) return;
+      const y1 = y(base + val), y0 = y(base);
+      g += `<rect x="${x0}" y="${y1}" width="${bw}" height="${Math.max(0, y0 - y1)}" fill="${col}"><title>${esc(s.name)}：${fmt(val, 2)}</title></rect>`;
+      base += val;
+    });
+    if (s.ct > 0) g += `<text x="${cx}" y="${y(s.ct) - 5}" text-anchor="middle" font-size="11" font-weight="${hi ? 700 : 500}" fill="${hi ? "var(--ng)" : "var(--ink)"}">${fmt(s.ct, 1)}</text>`;
+    const label = s.name.length > 14 ? s.name.slice(0, 14) + "…" : s.name;
+    g += `<text x="${cx}" y="${padT + plotH + 12}" font-size="11" fill="${hi ? "var(--ng)" : "var(--ink2)"}" text-anchor="end" transform="rotate(-45 ${cx} ${padT + plotH + 12})">${esc(label)}</text>`;
+  });
+  g += `<line x1="${padL}" x2="${padL + plotW}" y1="${y(0)}" y2="${y(0)}" stroke="var(--ink2)"/>`;
+  // 横线 + 右侧标签（避免重叠）
+  const labs = lines.filter(l => l.v > 0).map(l => ({ ...l, yy: y(l.v) })).sort((a, b) => a.yy - b.yy);
+  labs.forEach((l, i) => { if (i && l.yy - labs[i - 1].ly < 14) l.ly = labs[i - 1].ly + 14; else l.ly = l.yy; });
+  labs.forEach(l => {
+    g += `<line x1="${padL}" x2="${padL + plotW}" y1="${l.yy}" y2="${l.yy}" stroke="${l.c}" stroke-width="2" ${l.dash ? `stroke-dasharray="${l.dash}"` : ""}/>`;
+    g += `<text x="${padL + plotW + 6}" y="${l.ly + 4}" font-size="11.5" fill="${l.c}" font-weight="600">${l.name} ${fmt(l.v, 1)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="节拍山积图" style="max-width:none;display:block">${g}</svg>`;
+}
+
+function pill(level, text) { return level ? `<span class="pill ${level}">${text}</span>` : text; }
+function checkRows(list) {
+  return list.map(c => `<tr><td>${c.label}</td><td>${c.level ? pill(c.level, esc(c.value)) : esc(c.value)}</td></tr>`).join("");
+}
+
+function generate() {
+  const miss = validate();
+  if (miss.length) { $("#errs").textContent = "请补全：" + miss.join("、"); const b = document.querySelector("input.bad"); if (b) b.scrollIntoView({ block: "center" }); return; }
+  $("#errs").textContent = "";
+  const v = reader(STATE);
+  const R = TYPE.compute(v, TYPE);
+  R.stations.forEach(s => { s.work = s.work || 0; s.move = s.move || 0; s.per = s.per || 0; s.ct = s.work + s.move + s.per; });
+  R.hiSt = R.seg && R.seg.st !== null && R.seg.st >= 0 ? R.seg.st : -1;
+  const cap = capacity(v, R.LT);
+
+  // 线平衡（工位口径，同分析表 J 面板）
+  const act = R.stations.filter(s => s.ct > 0);
+  const nSt = act.length, sumCT = sum(act.map(s => s.ct)), stMax = max(act.map(s => s.ct));
+  const LBR = div(sumCT, nSt * stMax);
+  const SI = Math.sqrt(sum(act.map(s => (stMax - s.ct) ** 2)));
+  const LBR_LT = div(sumCT, nSt * R.LT);
+  const hidden = R.LT > stMax + EPS;
+
+  const src = R.seg ? R.seg.name : "待录入";
+  const overTarget = cap ? R.stations.filter(s => s.ct > cap.target + EPS) : [];
+  let verdict;
+  if (cap) {
+    verdict = cap.ok
+      ? `<div class="verdict ok">判定 OK：线体节拍 ${fmt(R.LT, 2)} ≤ 目标 ${fmt(cap.target, 2)} 秒/件<p>瓶颈在「${src}」，产能余量 ${pct(cap.margin)}。</p></div>`
+      : `<div class="verdict ng">判定 NG：受限于「${src}」，线体节拍 ${fmt(R.LT, 2)} > 目标 ${fmt(cap.target, 2)} 秒/件<p>${R.seg.detail}。改善方向：${R.seg.hint}。${overTarget.length ? "共 " + overTarget.length + " 个工位超目标" + (overTarget.length >= 3 ? "，属线体整体能力不足，单点改善难以达标，建议评估加线/并行" : "") : "各工位均未超目标，瓶颈不在单一工位（山积图看不出）"}。</p></div>`;
+  } else {
+    verdict = `<div class="verdict info">瓶颈：「${src}」${R.seg ? "，" + R.seg.detail : ""}<p>${R.seg ? "改善方向：" + R.seg.hint + "。" : ""}未填写客户月度需求，不做产能核算与达标判定。</p></div>`;
+  }
+
+  const kpis = [
+    { l: "实际线体节拍 LT", v: fmt(R.LT, 2), u: "秒/件", d: "约束：" + src, cls: cap ? (cap.ok ? "ok" : "ng") : "" },
+    { l: "工位瓶颈节拍（山积图最高）", v: fmt(stMax, 2), u: "秒/件", d: R.stations[R.hiSt] ? R.stations[R.hiSt].name : (hidden ? "LT 不在任何单一工位" : "") },
+    { l: "线平衡率 LBR", v: pct(LBR), u: "", d: "平衡损失 " + pct(1 - LBR) + " · SI " + fmt(SI, 1), cls: LBR < 0.6 ? "warn" : "" },
+    { l: "理论产出（不含 OEE）", v: fmt(div(3600, R.LT), 1), u: "件/小时", d: R.N > 1 ? "≈ " + fmt(div(3600, R.LT * R.N), 1) + " 工装/小时" : "" }
+  ];
+  if (cap) kpis.push(
+    { l: "目标线体节拍 TT×OEE", v: fmt(cap.target, 2), u: "秒/件", d: "客户节拍 TT " + fmt(cap.TT, 2) },
+    { l: "月产能 / 月需求", v: fmt(cap.month, 0), u: "件", d: "需求 " + fmt(cap.pcs, 0) + " · 缺口 " + fmt(cap.gap, 0), cls: cap.gap >= 0 ? "ok" : "ng" }
+  );
+
+  const segRows = R.segs.map(s => {
+    const hi = R.seg === s;
+    return `<tr class="${hi ? "hi" : ""}"><td>${s.name}${hi ? ' <span class="pill ng">瓶颈</span>' : ""}</td><td class="n">${s.ct ? fmt(s.ct, 2) : "—"}</td>
+      <td class="barcell"><i class="${hi ? "hi" : ""}" style="width:${R.LT ? Math.round(s.ct / R.LT * 100) : 0}%"></i></td><td>${esc(s.detail)}</td></tr>`;
+  }).join("");
+
+  const stRows = R.stations.map((s, i) => {
+    let st = "";
+    if (cap && s.ct > 0) st = s.ct > cap.target + EPS ? pill("ng", "超目标") : s.ct > cap.target - cap.tol ? pill("warn", "临界") : pill("ok", "OK");
+    return `<tr class="${i === R.hiSt ? "hi" : ""}"><td>${esc(s.name)}</td><td class="n">${fmt(s.work, 2)}</td><td class="n">${s.move ? fmt(s.move, 2) : ""}</td><td class="n">${s.per ? fmt(s.per, 2) : ""}</td>
+      <td class="n"><b>${fmt(s.ct, 2)}</b></td><td class="n">${s.ct ? fmt(R.LT - s.ct, 2) : ""}</td><td class="n">${s.ct ? pct(s.ct / R.LT, 0) : ""}</td>${cap ? `<td>${st}</td>` : ""}</tr>`;
+  }).join("");
+
+  const capHTML = cap ? `
+    <section class="card"><h2>产能核算</h2>
+      <div class="two">
+        <div><h3 style="margin-bottom:6px">订单与目标</h3><table>
+          <tr><td>月需求件数</td><td class="n">${fmt(cap.pcs, 0)} 件</td></tr>
+          <tr><td>月可用时间</td><td class="n">${cap.days} 天 × ${cap.mins} 分 = ${fmt(cap.days * cap.mins * 60, 0)} s</td></tr>
+          <tr><td>日均需求</td><td class="n">${fmt(cap.dailyDem, 0)} 件/天</td></tr>
+          <tr><td>客户节拍 TT</td><td class="n">${fmt(cap.TT, 2)} s/件</td></tr>
+          <tr><td>OEE</td><td class="n">${pct(cap.oee, 0)}</td></tr>
+          <tr><td>目标线体节拍 TT×OEE</td><td class="n"><b>${fmt(cap.target, 2)} s/件</b></td></tr>
+          <tr><td>判定 LT ≤ TT×OEE</td><td class="n">${pill(cap.ok ? "ok" : "ng", cap.ok ? "OK" : "NG 产能不足")}</td></tr>
+        </table></div>
+        <div><h3 style="margin-bottom:6px">产出能力</h3><table>
+          <tr><td>交付节拍 DT = LT/OEE</td><td class="n">${fmt(cap.DT, 2)} s</td></tr>
+          <tr><td>产能 JPH</td><td class="n">${fmt(cap.jph, 1)} 件/小时</td></tr>
+          <tr><td>日产能</td><td class="n">${fmt(cap.daily, 0)} 件/天（达成 ${pct(div(cap.daily, cap.dailyDem), 0)}）</td></tr>
+          <tr><td>月产能</td><td class="n">${fmt(cap.month, 0)} 件/月</td></tr>
+          <tr><td>产能缺口</td><td class="n">${pill(cap.gap >= 0 ? "ok" : "ng", fmt(cap.gap, 0) + " 件/月")}</td></tr>
+          <tr><td>产能余量</td><td class="n">${pct(cap.margin)}</td></tr>
+          <tr><td>超目标工位数</td><td class="n">${overTarget.length} 个</td></tr>
+        </table></div>
+      </div>
+      ${R.capChecks ? `<h3 style="margin:14px 0 6px">按目标节拍反算</h3><table>${checkRows(R.capChecks(cap))}</table>` : ""}
+    </section>` : `<section class="card noprint"><h2>产能核算</h2><div class="sub">未填写「产能核算基础数据」中的客户月度需求，本次不生成产能核算。需要时展开表单最后一节补填后重新生成。</div></section>`;
+
+  const legend = `<div class="legend">
+    <span><i class="sw" style="background:var(--c-work)"></i>工位作业</span>
+    <span><i class="sw" style="background:var(--c-move)"></i>流转/移栽</span>
+    <span><i class="sw" style="background:var(--c-per)"></i>周期作业摊销</span>
+    <span><i class="sw" style="background:var(--c-hi)"></i>瓶颈工位</span>
+    <span><i class="ln" style="border-color:var(--lt);border-top-style:dashed"></i>线体节拍 LT</span>
+    ${cap ? `<span><i class="ln" style="border-color:var(--tt)"></i>客户节拍 TT</span><span><i class="ln" style="border-color:var(--target)"></i>目标 TT×OEE</span><span><i class="ln" style="border-color:var(--dt);border-top-style:dotted"></i>交付节拍 DT</span>` : ""}
+  </div>`;
+
+  const now = new Date();
+  const stamp = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0") + " " + String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+
+  $("#out").innerHTML = `
+    <section class="card">
+      <div class="btns noprint" style="justify-content:space-between;margin-bottom:10px">
+        <h2 style="margin:0"><span class="step">3</span>核对结果 · ${esc(R.title)}</h2>
+        <div class="btns"><button class="b sm" id="copy">复制结果摘要</button><button class="b sm" id="print">打印 / 存 PDF</button><button class="b sm" id="edit">返回修改数据</button></div>
+      </div>
+      <div class="sub" style="margin-bottom:10px">生成时间 ${stamp} · 全部为 秒/件 口径${R.N > 1 ? "（工装载 " + R.N + " 件，已折算）" : ""}</div>
+      ${verdict}
+      <div class="kpis">${kpis.map(k => `<div class="kpi ${k.cls || ""}"><div class="l">${k.l}</div><div class="v">${k.v}<small>${k.u}</small></div><div class="d">${esc(k.d)}</div></div>`).join("")}</div>
+      <h3>节拍图（山积图）</h3>
+      ${legend}
+      <div class="chart-box">${chartSVG(R, cap)}</div>
+      ${hidden ? `<div class="note">⚠ 线体节拍 ${fmt(R.LT, 2)} 高于山积图最高工位 ${fmt(stMax, 2)}：瓶颈「${src}」不体现在单一工位上（如工装数量），只看山积图会漏判。</div>` : ""}
+    </section>
+
+    <section class="card"><h2>瓶颈工序 · 各段节拍</h2>
+      <div class="sub" style="margin-bottom:8px">实际线体节拍 = 各段节拍取最大；条形为占 LT 比例</div>
+      <div class="tbl-wrap"><table><tr><th>段</th><th class="n">节拍 s/件</th><th>占 LT</th><th>构成 / 约束</th></tr>${segRows}</table></div>
+    </section>
+
+    <section class="card"><h2>节拍平衡数据</h2>
+      <div class="kpis">
+        <div class="kpi"><div class="l">工位数 n</div><div class="v">${nSt}</div></div>
+        <div class="kpi"><div class="l">工位时间总和 ΣCT</div><div class="v">${fmt(sumCT, 1)}<small>s</small></div></div>
+        <div class="kpi"><div class="l">线平衡率 LBR = ΣCT/(n×工位瓶颈)</div><div class="v">${pct(LBR)}</div><div class="d">平衡损失率 ${pct(1 - LBR)}</div></div>
+        <div class="kpi"><div class="l">按实际 LT 的平衡率</div><div class="v">${pct(LBR_LT)}</div><div class="d">ΣCT/(n×LT)</div></div>
+        <div class="kpi"><div class="l">平滑指数 SI</div><div class="v">${fmt(SI, 1)}</div><div class="d">√Σ(工位瓶颈−CTᵢ)²，越小越平衡</div></div>
+      </div>
+      <div class="tbl-wrap"><table>
+        <tr><th>工位</th><th class="n">作业</th><th class="n">流转/移栽</th><th class="n">周期摊销</th><th class="n">合计 CT</th><th class="n">距 LT 空闲</th><th class="n">负荷率</th>${cap ? "<th>vs 目标</th>" : ""}</tr>
+        ${stRows}
+      </table></div>
+      ${(R.checks && R.checks.length) ? `<h3 style="margin:14px 0 6px">线体专项核算</h3><table>${checkRows(R.checks)}</table>` : ""}
+      ${(R.diag && R.diag.length) ? `<h3 style="margin:14px 0 6px">下料口实测诊断</h3><table>${checkRows(R.diag)}</table>` : ""}
+    </section>
+    ${capHTML}`;
+  $("#out").classList.remove("hidden");
+  $("#stamp").textContent = "";
+  $("#print").onclick = () => window.print();
+  $("#edit").onclick = () => $("#form").scrollIntoView({ behavior: "smooth" });
+  $("#copy").onclick = () => copySummary(R, cap, { LBR, nSt, stMax, src, overTarget });
+  $("#out").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function copySummary(R, cap, x) {
+  const lines = [
+    "【节拍核对】" + R.title,
+    "实际线体节拍 LT：" + fmt(R.LT, 2) + " 秒/件（约束：" + x.src + (R.seg ? "，" + R.seg.detail : "") + "）",
+    "工位瓶颈：" + (R.stations[R.hiSt] ? R.stations[R.hiSt].name : "—") + " " + fmt(x.stMax, 2) + " 秒/件",
+    "线平衡率 LBR：" + pct(x.LBR) + "（" + x.nSt + " 个工位）",
+    "各段：" + R.segs.filter(s => s.ct).map(s => s.name + " " + fmt(s.ct, 1)).join("；")
+  ];
+  if (cap) lines.push(
+    "目标 TT×OEE：" + fmt(cap.target, 2) + " 秒/件 → " + (cap.ok ? "OK" : "NG"),
+    "月产能 " + fmt(cap.month, 0) + " / 需求 " + fmt(cap.pcs, 0) + " 件，缺口 " + fmt(cap.gap, 0) + "，超目标工位 " + x.overTarget.length + " 个"
+  );
+  if (R.seg && R.seg.hint) lines.push("改善方向：" + R.seg.hint);
+  const txt = lines.join("\n");
+  const done = () => { $("#copy").textContent = "已复制"; setTimeout(() => $("#copy").textContent = "复制结果摘要", 1500); };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(txt).then(done, () => fallbackCopy(txt, done));
+  else fallbackCopy(txt, done);
+}
+function fallbackCopy(txt, done) {
+  const ta = document.createElement("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) { alert(txt); }
+  ta.remove();
+}
+
+/* ============ 启动 ============ */
+$("#go").onclick = generate;
+$("#reset").onclick = () => { if (!confirm("清空「" + TYPE.name + "」已填数据？")) return; STATE = blankState(TYPE); save(); renderForm(); $("#out").classList.add("hidden"); };
+$("#demo").onclick = () => {
+  const d = DEMO[TYPE.id]; if (!d) return;
+  STATE = blankState(TYPE);
+  Object.assign(STATE.vals, Object.fromEntries(Object.entries(d.vals).map(([k, x]) => [k, String(x)])));
+  Object.entries(d.tabs).forEach(([k, rows]) => STATE.tabs[k] = rows.map(r => ({ ...r })));
+  save(); renderForm(); generate();
+};
+renderTypes();
+const last = store.get("lsx-takt-last");
+if (last && TYPES.some(t => t.id === last)) pickType(last);
+</script>
+</body>
+</html>
