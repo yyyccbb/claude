@@ -39,5 +39,5 @@
 ## 随包工具
 - `.claude/skills/line-takt-analysis-2-0/` — 产线节拍/连续性分析 skill（`analyze_interval.py` → `build_dashboard.py`，输出 HTML 看板）
 - `tools/takt-checker/index.html` — 线体节拍快速核对网页（5 种线型，口径同节拍分析表 9.2 区；产能核算选填）
-- `tools/line-sim/index.html` — 自粘钢固化线零件/工装流转模拟（平面布局动画、倍速、AI/本地指令干预、可导入节拍分析表 .xlsx）
+- `tools/line-sim/index.html` — 自粘钢固化线零件/工装流转模拟（平面布局动画、倍速；线体结构/放行逻辑/流转方向可由表格或对话修改；AI 走 MiMo/OpenAI 兼容接口，跨域时用同目录 `ai-proxy.js` 转发）
 - `templates/LSX_PPT_gen_template.js` — LSX 标准 PPT 模板（前 142 行为可复用函数：makeCover/makeTOC/makeSection/makeContent/makeTable/makeEnding 等）

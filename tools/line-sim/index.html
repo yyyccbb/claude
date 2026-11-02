@@ -137,11 +137,13 @@ table.ed input[type=checkbox]{width:16px;height:16px}
       <details class="cfg" id="aiCfg">
         <summary>AI 接口设置 <span class="tag" id="aiMode">本地指令解析</span></summary>
         <div class="b">
-          <div class="sub" style="margin-bottom:6px">填入 Anthropic API Key 后由 Claude 理解指令、调节拍、改运行逻辑、回答线体问题；不填则用本地规则解析常用指令（停机/恢复/改节拍/倍速/开关通道/工装数）。Key 只保存在本机浏览器。</div>
-          <label class="sub">API Key</label><input type="password" id="aiKey" placeholder="sk-ant-..." style="width:100%">
-          <label class="sub">API 地址（可空；公司代理/网关地址填这里）</label><input id="aiBase" placeholder="https://api.anthropic.com" style="width:100%">
-          <label class="sub">模型</label><input id="aiModel" value="claude-opus-5-5" style="width:100%">
-          <div class="row" style="margin-top:6px"><button class="sm" id="aiSave">保存</button> <button class="sm" id="aiClear">清除 Key</button></div>
+          <div class="sub" style="margin-bottom:6px">填入 Key 后由大模型理解指令：停机/恢复、调节拍、改放行逻辑、改线体结构与流转方向、回答线体问题；不填则用本地规则解析常用指令。Key 只保存在本机浏览器。</div>
+          <label class="sub">接口类型</label>
+          <select id="aiProv" style="width:100%"><option value="openai">MiMo / OpenAI 兼容接口</option><option value="claude">Anthropic Claude</option></select>
+          <label class="sub">API 地址（OpenAI 兼容填到 /v1；浏览器跨域被拦时填本地转发 http://localhost:8787/v1）</label><input id="aiBase" placeholder="https://api.xiaomimimo.com/v1" style="width:100%">
+          <label class="sub">模型（以 MiMo 控制台显示的模型 ID 为准）</label><input id="aiModel" placeholder="mimo-v2-flash" style="width:100%">
+          <label class="sub">API Key</label><input type="password" id="aiKey" placeholder="sk-..." style="width:100%">
+          <div class="row" style="margin-top:6px;display:flex;gap:6px"><button class="sm" id="aiSave">保存</button><button class="sm" id="aiTest">测试连接</button><button class="sm" id="aiClear">清除 Key</button></div>
         </div>
       </details>
       <div class="chat" id="chat"></div>
@@ -158,19 +160,31 @@ table.ed input[type=checkbox]{width:16px;height:16px}
 
 <script>
 "use strict";
-/* ================= 基础数据（默认 = 定子自粘钢固化线 节拍分析表 9.2 区现值） ================= */
+/* =====================================================================
+   线体模型（模板拓扑可编辑）：
+   上料段工位链(按工装) → 进料主通道 → 并联通道[工位序列] → 出料主通道 → 脱模
+   → 冷却通道(按组前移，可关) → 检测线上料机械手 → 同步检测线 → 人工段工位链 → 成品
+   空工装：脱模 → 回流线 → 上料段第一个工位
+   放行时间 TimeSpec：{type:"fixed",v} | {type:"uniform",min,max} | {type:"normal",mean,sd} | {type:"tri",min,mode,max}
+   ===================================================================== */
+const T = v => ({ type: "fixed", v });
 const DEFAULT_CFG = {
   name: "定子自粘钢固化线",
-  N: 1, mode: 2, Tch: 1200,
+  N: 1, tools: 34, dispatch: "nearest", vari: 0.05,
+  layout: { mirror: false, ch1: "near" },
+  pre: [{ id: "load", name: "上料工位", t: T(80) }, { id: "pre", name: "预压工位", t: T(50) }],
+  feedGap: 2, outGap: 2, ret: 95, feedQ: 3,
   channels: [15, 23.5, 43, 51.5, 71, 79.5, 99, 107.5, 127, 135.5].map((x, i) => ({ on: i < 9, tin: x, tout: x })),
-  gapIn: 2, gapOut: 2,
-  load: 80, pre: 50, demold: 117, ret: 95, tools: 34,
-  cool: { rows: 3, cols: 16, grp: 6, fwd: 12, minStop: 0, r1: 18, r2: 20, req: 600 },
-  insp: { move: 8, st: [["测高", 13.3], ["内径通规", 6.7], ["线槽通规", 11.7], ["打码", 15.6], ["除尘", 14.5], ["", 0]].map((r, i) => ({ on: i < 5, name: r[0], t: r[1] })) },
-  unload: 3, visual: 10, place: 2, perLayer: 17, layers: 40,
+  chIndex: "sync",
+  chStages: [{ name: "加热固化", t: T(1200) }, { name: "冷却", t: T(1200) }],
+  demold: { name: "脱模工位", t: T(117) },
+  cool: { on: true, rows: 3, cols: 16, grp: 6, fwd: 12, minStop: 0, r1: 18, req: 600 },
+  loader: { name: "检测线上料机械手", t: T(20) },
+  insp: { move: 8, st: [["测高", 13.3], ["内径通规", 6.7], ["线槽通规", 11.7], ["打码", 15.6], ["除尘", 14.5], ["", 0]].map((r, i) => ({ on: i < 5, name: r[0], t: T(r[1]) })) },
+  post: [{ id: "unload", name: "下料(人工)", t: T(3) }, { id: "visual", name: "目检", t: T(10) }, { id: "pack", name: "装箱", t: T(2), pack: true }],
+  postBuf: 5,
+  perLayer: 17, layers: 40,
   pack: [["拍照", 10, 2], ["扫码", 80, 2], ["盖中衬", 60, 2], ["挪动包材", 60, 3]].map(r => ({ on: true, name: r[0], t: r[1], f: r[2] })),
-  buf: { feedQ: 3, unl: 5, vis: 5, pack: 5 },
-  dispatch: "nearest", vari: 0.05,
   demand: { dem: 18000, use: 1, days: 26, mins: 1320, oee: 0.9 }
 };
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -178,26 +192,81 @@ const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 };
-let CFG = Object.assign(clone(DEFAULT_CFG), store.get("lsx-sim-cfg") || {});
 
-/* ================= 理论节拍（同节拍分析表口径） ================= */
+/* ---------- 放行时间 ---------- */
+function normT(t) {
+  if (t === null || t === undefined || t === "") return T(0);
+  if (typeof t === "number" || typeof t === "string") return T(+t || 0);
+  const ty = t.type || (t.min !== undefined ? "uniform" : t.mean !== undefined ? "normal" : "fixed");
+  if (ty === "uniform") { const a = +t.min || 0, b = +t.max || 0; return { type: "uniform", min: Math.min(a, b), max: Math.max(a, b) }; }
+  if (ty === "normal") return { type: "normal", mean: +t.mean || 0, sd: Math.abs(+t.sd || 0) };
+  if (ty === "tri") { const xs = [+t.min || 0, +t.mode || 0, +t.max || 0]; return { type: "tri", min: Math.min(...xs), mode: xs[1], max: Math.max(...xs) }; }
+  return T(+(t.v ?? t.value ?? 0) || 0);
+}
+function tMean(t) { t = normT(t); return t.type === "uniform" ? (t.min + t.max) / 2 : t.type === "normal" ? t.mean : t.type === "tri" ? (t.min + t.mode + t.max) / 3 : t.v; }
+const rnd = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+function tSample(t) {
+  t = normT(t);
+  if (t.type === "uniform") return t.min + Math.random() * (t.max - t.min);
+  if (t.type === "normal") return Math.max(t.mean * 0.2, t.mean + t.sd * rnd());
+  if (t.type === "tri") { const u = Math.random(), { min: a, mode: c, max: b } = t; if (b === a) return a; const f = (c - a) / (b - a); return u < f ? a + Math.sqrt(u * (b - a) * (c - a)) : b - Math.sqrt((1 - u) * (b - a) * (b - c)); }
+  const base = t.v; // 固定值：叠加全局工时波动
+  if (!CFG.vari || base <= 0) return base;
+  return Math.max(base * 0.5, Math.min(base * 1.5, base * (1 + CFG.vari * rnd())));
+}
+function tText(t) {
+  t = normT(t); const f = x => +(+x).toFixed(2);
+  return t.type === "uniform" ? `${f(t.min)}~${f(t.max)}s` : t.type === "normal" ? `${f(t.mean)}±${f(t.sd)}s` : t.type === "tri" ? `${f(t.min)}/${f(t.mode)}/${f(t.max)}s` : `${f(t.v)}s`;
+}
+const T_NAMES = { fixed: "固定", uniform: "区间均匀波动", normal: "正态波动", tri: "三角分布" };
+
+/* ---------- 配置规范化（AI/表格修改后统一走这里） ---------- */
+let uid = 1;
+function normCfg(c) {
+  const d = DEFAULT_CFG, o = Object.assign(clone(d), c || {});
+  o.layout = Object.assign(clone(d.layout), o.layout || {});
+  o.cool = Object.assign(clone(d.cool), o.cool || {});
+  o.insp = Object.assign(clone(d.insp), o.insp || {});
+  o.demand = Object.assign(clone(d.demand), o.demand || {});
+  o.N = Math.max(1, Math.round(+o.N || 1));
+  o.tools = Math.max(1, Math.round(+o.tools || 1));
+  const ids = new Set();
+  const fixSt = (s, pfx) => { s = Object.assign({}, s); s.t = normT(s.t); s.name = String(s.name || "工位"); if (!s.id || ids.has(s.id)) s.id = pfx + (uid++); ids.add(s.id); return s; };
+  o.pre = (Array.isArray(o.pre) && o.pre.length ? o.pre : clone(d.pre)).map(s => fixSt(s, "p"));
+  o.post = (Array.isArray(o.post) ? o.post : clone(d.post)).map(s => fixSt(s, "q"));
+  o.chStages = (Array.isArray(o.chStages) && o.chStages.length ? o.chStages : clone(d.chStages)).map(s => ({ name: String(s.name || "通道工位"), t: normT(s.t) }));
+  o.channels = (Array.isArray(o.channels) && o.channels.length ? o.channels : clone(d.channels)).map(x => ({ on: x.on !== false, tin: +x.tin || 0, tout: +x.tout || 0 }));
+  o.chIndex = o.chIndex === "async" ? "async" : "sync";
+  o.demold = { name: (o.demold && o.demold.name) || "脱模工位", t: normT(o.demold && o.demold.t) };
+  o.loader = { name: (o.loader && o.loader.name) || "检测线上料机械手", t: normT(o.loader && o.loader.t) };
+  o.insp.st = (o.insp.st || []).map(s => ({ on: s.on !== false, name: String(s.name || ""), t: normT(s.t) }));
+  o.dispatch = ["nearest", "roundrobin", "farthest"].includes(o.dispatch) ? o.dispatch : "nearest";
+  o.layout.ch1 = o.layout.ch1 === "far" ? "far" : "near"; o.layout.mirror = !!o.layout.mirror;
+  return o;
+}
+let CFG = normCfg(store.get("lsx-sim-cfg2") || DEFAULT_CFG);
+const structSig = c => JSON.stringify([c.N, c.pre.map(s => s.id), c.chStages.length, c.channels.length, c.cool.on, c.cool.rows, c.cool.cols, c.cool.grp, c.insp.st.map(s => s.on), c.post.map(s => s.id)]);
+
+/* ================= 理论节拍（同节拍分析表口径，波动取均值） ================= */
 function theory(c) {
-  const N = c.N || 1, on = c.channels.filter(x => x.on), n = on.length;
-  const par = n ? c.Tch / (n * N) : 0;
-  const stay = c.mode === 2 ? 2 * c.Tch : c.Tch;
-  const avg = k => n ? on.reduce((s, x) => s + (+x[k] || 0), 0) / n : 0;
-  const loop = (n ? avg("tin") + stay + avg("tout") : 0) + c.load + c.pre + c.demold + c.ret;
+  const N = c.N, on = c.channels.filter(x => x.on), n = on.length, K = c.chStages.length;
+  const stMax = Math.max(...c.chStages.map(s => tMean(s.t)));
+  const par = n ? stMax / (n * N) : 0;
+  const stay = c.chIndex === "sync" ? K * stMax : c.chStages.reduce((a, s) => a + tMean(s.t), 0);
+  const avg = k => n ? on.reduce((s, x) => s + x[k], 0) / n : 0;
+  const preSum = c.pre.reduce((a, s) => a + tMean(s.t), 0);
+  const loop = (n ? avg("tin") + stay + avg("tout") : 0) + preSum + tMean(c.demold.t) + c.ret;
   const toolCT = c.tools ? loop / (c.tools * N) : 0;
-  const cure = Math.max(par, c.gapIn / N, c.gapOut / N, toolCT);
-  const cl = c.cool, cap = cl.rows * cl.cols;
-  const cool = Math.max(cl.grp ? (Math.max(cl.minStop, cl.grp * Math.max(cl.r1, cl.r2)) + cl.fwd) / cl.grp : 0, cap ? cl.req / cap : 0);
+  const cure = Math.max(par, c.feedGap / N, c.outGap / N, toolCT);
+  const cl = c.cool, cap = cl.rows * cl.cols, r2 = tMean(c.loader.t);
+  const cool = cl.on ? Math.max(cl.grp ? (Math.max(cl.minStop, cl.grp * Math.max(cl.r1, r2)) + cl.fwd) / cl.grp : 0, cap ? cl.req / cap : 0) : r2;
   const ins = c.insp.st.filter(s => s.on);
-  const insp = ins.length ? Math.max(...ins.map(s => +s.t || 0)) + c.insp.move : 0;
+  const insp = ins.length ? Math.max(...ins.map(s => tMean(s.t))) + c.insp.move : 0;
   const perBox = c.perLayer * c.layers;
   const per = c.pack.filter(p => p.on).reduce((s, p) => s + p.t / (p.f == 3 ? (perBox || 1) : p.f == 2 ? (c.perLayer || 1) : 1), 0);
-  const man = Math.max(c.unload, c.visual, c.place + per);
-  const lpd = Math.max(c.load, c.pre, c.demold) / N;
-  const segs = [["固化段", cure], ["检测段", insp], ["冷却段", cool], ["人工段", man], ["上料/预压/脱模", lpd]];
+  const man = Math.max(0, ...c.post.map(s => tMean(s.t) + (s.pack ? per : 0)));
+  const lpd = Math.max(...c.pre.map(s => tMean(s.t)), tMean(c.demold.t)) / N;
+  const segs = [["固化通道段", cure], ["检测段", insp], [cl.on ? "冷却段" : "检测上料", cool], ["人工段", man], ["上料段/脱模", lpd]];
   const LT = Math.max(...segs.map(s => s[1]));
   const d = c.demand, TT = d.dem ? d.days * d.mins * 60 / (d.dem * (d.use || 1)) : 0;
   return { LT, src: (segs.find(s => s[1] === LT) || ["—"])[0], segs, target: TT * (d.oee || 1), loop, toolCT, par };
@@ -206,91 +275,77 @@ function theory(c) {
 /* ================= 仿真引擎 ================= */
 const DT = 0.5;
 let S = null;
-const rnd = () => { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
-const vt = base => { if (!CFG.vari || base <= 0) return base; return Math.max(base * 0.5, Math.min(base * 1.5, base * (1 + CFG.vari * rnd()))); };
-
-function mkSrv(id, name) { return { id, name, ent: null, rem: 0, done: false, st: { work: 0, block: 0, idle: 0, down: 0 } }; }
-
-function inspStations() { return CFG.insp.st.map((s, i) => ({ ...s, i })).filter(s => s.on); }
+const ST0 = () => ({ work: 0, block: 0, idle: 0, down: 0 });
+function mkSrv(id, name) { return { id, name, ent: null, rem: 0, done: false, st: ST0() }; }
+const inspStations = () => CFG.insp.st.map((s, i) => ({ ...s, i })).filter(s => s.on);
 
 function resetSim() {
-  const c = CFG;
+  const c = CFG, prevLog = S ? S.log : [], running = S ? S.running : false;
   S = {
-    t: 0, running: S ? S.running : false, nextId: 1, out: 0, outTimes: [], hourly: [], coolTimes: [], down: {}, scheduled: [],
-    retBuf: [], ret: [], feedQ: [], feed: [], out_: [], demQ: [], unlQ: [], visQ: [], packQ: [], toolDeficit: 0,
-    lastFeed: -1e9, lastOut: -1e9, rr: 0, packCount: 0,
-    srv: {}, ch: [], log: S ? S.log : [],
+    t: 0, running, nextId: 1, out: 0, outTimes: [], hourly: [], coolTimes: [], down: {}, scheduled: [],
+    retBuf: [], ret: [], feedQ: [], feed: [], out_: [], demQ: [], pickQ: [], toolDeficit: 0,
+    lastFeed: -1e9, lastOut: -1e9, rr: 0, packCount: 0, log: prevLog,
+    pre: c.pre.map(s => mkSrv(s.id, s.name)),
+    post: c.post.map(s => mkSrv(s.id, s.name)), postQ: c.post.map(() => []),
+    demold: mkSrv("demold", c.demold.name), loader: mkSrv("loader", c.loader.name),
+    ch: c.channels.map(() => ({ pos: c.chStages.map(() => null), posSt: c.chStages.map(ST0), entry: null, resv: false })),
   };
-  const add = (id, name) => S.srv[id] = mkSrv(id, name);
-  add("load", "上料工位"); add("pre", "预压工位"); add("demold", "脱模工位"); add("loader", "检测线上料机械手");
-  add("unload", "下料(人工)"); add("visual", "目检"); add("pack", "装箱");
-  c.channels.forEach((ch, i) => {
-    S.ch.push({ heat: mkSrv(`ch${i + 1}.heat`, `${i + 1}通道 加热位`), cool: mkSrv(`ch${i + 1}.cool`, `${i + 1}通道 冷却位`), resv: false, entry: null });
-  });
   const G = Math.max(2, Math.floor(c.cool.rows * c.cool.cols / Math.max(1, c.cool.grp)));
-  S.cool = { G, groups: Array.from({ length: G }, () => []), idxRem: 0, lastIdx: -1e9, st: { work: 0, block: 0, idle: 0, down: 0 } };
+  S.cool = { G, groups: Array.from({ length: G }, () => []), idxRem: 0, lastIdx: -1e9, st: ST0() };
   const k = inspStations().length;
-  S.insp = { pos: Array(k).fill(null), nest: null, phase: "work", rem: 0, st: { work: 0, block: 0, idle: 0, down: 0 }, posSt: Array.from({ length: k }, () => ({ work: 0, block: 0, idle: 0, down: 0 })) };
+  S.insp = { pos: Array(k).fill(null), nest: null, phase: "work", rem: 0, st: ST0(), posSt: Array.from({ length: k }, ST0) };
   for (let i = 0; i < c.tools; i++) S.retBuf.push({ id: S.nextId++, n: 0 });
-  logEv("按当前基础数据重置：" + c.tools + " 套工装，" + c.channels.filter(x => x.on).length + " 个通道在用", "");
+  logEv(`按当前线体结构重置：上料段 ${c.pre.length} 工位，${c.channels.filter(x => x.on).length} 通道 × [${c.chStages.map(s => s.name).join("→")}]，工装 ${c.tools} 套`, "");
 }
 
 const isDown = id => { const d = S.down[id]; return !!d && d.until > S.t; };
-function downAny(...ids) { return ids.some(isDown); }
-
 function tickSrv(s, extraDown) {
   const dn = isDown(s.id) || extraDown;
-  if (dn) s.st.down += DT;
-  else if (s.ent && !s.done) s.st.work += DT;
-  else if (s.ent && s.done) s.st.block += DT;
-  else s.st.idle += DT;
+  if (dn) s.st.down += DT; else if (s.ent && !s.done) s.st.work += DT; else if (s.ent) s.st.block += DT; else s.st.idle += DT;
   if (s.ent && !s.done && !dn) { s.rem -= DT; if (s.rem <= 0) s.done = true; }
 }
 const free = s => !s.ent;
 const take = (s, ent, time) => { s.ent = ent; s.rem = time; s.done = false; };
 const release = s => { const e = s.ent; s.ent = null; s.done = false; s.rem = 0; return e; };
+const chId = (i, k) => `ch${i + 1}.${k + 1}`;
 
 function step() {
-  const c = CFG, N = c.N || 1;
+  const c = CFG, N = c.N, K = c.chStages.length;
   S.t += DT;
-  // 计划干预 & 停机到期
   S.scheduled = S.scheduled.filter(job => { if (job.at <= S.t) { applyAction(job.act, "计划"); return false; } return true; });
   for (const [id, d] of Object.entries(S.down)) if (d.until <= S.t) { delete S.down[id]; logEv(targetName(id) + " 恢复运行", "ok"); }
 
-  /* ---- 人工段（下游先行，腾出空间） ---- */
-  const pk = S.srv.pack;
-  tickSrv(pk);
-  if (pk.ent && pk.done) { release(pk); S.out++; S.outTimes.push(S.t); const h = Math.floor(S.t / 3600); S.hourly[h] = (S.hourly[h] || 0) + 1; }
-  if (free(pk) && S.packQ.length && !isDown("pack")) {
-    S.packCount++;
-    const perBox = c.perLayer * c.layers;
-    let tt = vt(c.place);
-    c.pack.forEach(p => {
-      if (!p.on || !p.t) return;
-      if (p.f == 1 || (p.f == 2 && c.perLayer && S.packCount % c.perLayer === 0) || (p.f == 3 && perBox && S.packCount % perBox === 0)) tt += vt(p.t);
-    });
-    take(pk, S.packQ.shift(), tt);
+  /* ---- 人工段工位链（下游先行） ---- */
+  for (let j = c.post.length - 1; j >= 0; j--) {
+    const s = S.post[j], cs = c.post[j];
+    tickSrv(s);
+    if (s.ent && s.done) {
+      if (j === c.post.length - 1) { release(s); finishPart(); }
+      else if (S.postQ[j + 1].length < c.postBuf) S.postQ[j + 1].push(release(s));
+    }
+    if (free(s) && S.postQ[j].length && !isDown(s.id)) {
+      let tt = tSample(cs.t);
+      if (cs.pack) {
+        S.packCount++;
+        const perBox = c.perLayer * c.layers;
+        c.pack.forEach(p => { if (p.on && p.t && (p.f == 1 || (p.f == 2 && c.perLayer && S.packCount % c.perLayer === 0) || (p.f == 3 && perBox && S.packCount % perBox === 0))) tt += p.t; });
+      }
+      take(s, S.postQ[j].shift(), tt);
+    }
   }
-  const vs = S.srv.visual;
-  tickSrv(vs);
-  if (vs.ent && vs.done && S.packQ.length < c.buf.pack) S.packQ.push(release(vs));
-  if (free(vs) && S.visQ.length && !isDown("visual")) take(vs, S.visQ.shift(), vt(c.visual));
-  const un = S.srv.unload;
-  tickSrv(un);
-  if (un.ent && un.done && S.visQ.length < c.buf.vis) S.visQ.push(release(un));
-  if (free(un) && S.unlQ.length && !isDown("unload")) take(un, S.unlQ.shift(), vt(c.unload));
+  const postIn = () => c.post.length ? S.postQ[0].length < c.postBuf : true;
+  const postPush = p => { if (c.post.length) S.postQ[0].push(p); else finishPart(); };
 
   /* ---- 同步检测线 ---- */
-  const ins = inspStations(), I = S.insp, k = ins.length;
-  const lineDown = isDown("insp");
-  if (k === 0) { if (I.nest && S.unlQ.length < c.buf.unl) { S.unlQ.push(I.nest); I.nest = null; } }
+  const ins = inspStations(), I = S.insp, k = ins.length, lineDown = isDown("insp");
+  if (k === 0) { if (I.nest && postIn()) { postPush(I.nest); I.nest = null; } }
   else if (I.phase === "move") {
     if (lineDown) I.st.down += DT; else { I.st.work += DT; I.rem -= DT; }
     if (I.rem <= 0) {
-      if (I.pos[k - 1]) S.unlQ.push(I.pos[k - 1].part);
+      if (I.pos[k - 1]) postPush(I.pos[k - 1].part);
       for (let j = k - 1; j > 0; j--) I.pos[j] = I.pos[j - 1];
       I.pos[0] = I.nest ? { part: I.nest, rem: 0 } : null; I.nest = null;
-      I.pos.forEach((p, j) => { if (p) p.rem = vt(+ins[j].t || 0); });
+      I.pos.forEach((p, j) => { if (p) p.rem = tSample(ins[j].t); });
       I.phase = "work";
     }
     I.posSt.forEach(s => s.idle += DT);
@@ -298,383 +353,487 @@ function step() {
     let allDone = true, any = false;
     I.pos.forEach((p, j) => {
       const sd = isDown("insp" + (ins[j].i + 1)) || lineDown, st = I.posSt[j];
-      if (sd) st.down += DT;
-      else if (p && p.rem > 0) st.work += DT;
-      else if (p) st.block += DT;
-      else st.idle += DT;
+      if (sd) st.down += DT; else if (p && p.rem > 0) st.work += DT; else if (p) st.block += DT; else st.idle += DT;
       if (p) { any = true; if (!sd && p.rem > 0) p.rem -= DT; if (p.rem > 0) allDone = false; }
     });
-    const canOut = !I.pos[k - 1] || S.unlQ.length < c.buf.unl;
+    const canOut = !I.pos[k - 1] || postIn();
     if ((any || I.nest) && allDone && canOut && !lineDown && !ins.some(s => isDown("insp" + (s.i + 1)))) { I.phase = "move"; I.rem = c.insp.move; }
     if (lineDown) I.st.down += DT; else if (!any && !I.nest) I.st.idle += DT;
   }
 
   /* ---- 检测线上料机械手 ---- */
-  const ld = S.srv.loader, cl = S.cool, exit = cl.groups[cl.G - 1];
+  const ld = S.loader, cl = S.cool, exit = c.cool.on ? cl.groups[cl.G - 1] : S.pickQ;
   tickSrv(ld);
   if (ld.ent && ld.done && !I.nest && I.phase !== "move") I.nest = release(ld);
   if (free(ld) && exit.length && !cl.idxRem && !isDown("loader") && !isDown("cooler")) {
     const p = exit.shift(); p.coolT = S.t - p.tIn; S.coolTimes.push(p.coolT); if (S.coolTimes.length > 50) S.coolTimes.shift();
-    take(ld, p, vt(c.cool.r2));
+    take(ld, p, tSample(c.loader.t));
   }
 
-  /* ---- 冷却通道：装满一组且出口组取空后整体前移一组 ---- */
+  /* ---- 冷却通道：入口组装满且出口组取空后整体前移一组 ---- */
   const cdn = isDown("cooler");
-  if (cl.idxRem > 0) {
-    if (cdn) cl.st.down += DT; else { cl.st.work += DT; cl.idxRem -= DT; }
-    if (cl.idxRem <= 0) { cl.idxRem = 0; for (let g = cl.G - 1; g > 0; g--) cl.groups[g] = cl.groups[g - 1]; cl.groups[0] = []; cl.lastIdx = S.t; }
-  } else {
-    if (cdn) cl.st.down += DT;
-    else if (cl.groups[0].length >= c.cool.grp && exit.length === 0 && S.t - cl.lastIdx >= (c.cool.minStop || 0)) { cl.idxRem = c.cool.fwd || DT; }
+  if (c.cool.on) {
+    if (cl.idxRem > 0) {
+      if (cdn) cl.st.down += DT; else { cl.st.work += DT; cl.idxRem -= DT; }
+      if (cl.idxRem <= 0) { cl.idxRem = 0; for (let g = cl.G - 1; g > 0; g--) cl.groups[g] = cl.groups[g - 1]; cl.groups[0] = []; cl.lastIdx = S.t; }
+    } else if (cdn) cl.st.down += DT;
+    else if (cl.groups[0].length >= c.cool.grp && exit.length === 0 && S.t - cl.lastIdx >= (c.cool.minStop || 0)) cl.idxRem = c.cool.fwd || DT;
     else if (cl.groups[0].length >= c.cool.grp) cl.st.block += DT;
     else cl.st.idle += DT;
   }
 
   /* ---- 脱模 ---- */
-  const dm = S.srv.demold;
+  const dm = S.demold;
   tickSrv(dm);
-  if (dm.ent && dm.done && !cl.idxRem && !cdn && cl.groups[0].length + dm.ent.n <= Math.max(c.cool.grp, dm.ent.n)) {
+  const coolRoom = n => c.cool.on ? (!cl.idxRem && !cdn && cl.groups[0].length + n <= Math.max(c.cool.grp, n)) : S.pickQ.length < Math.max(6, n);
+  if (dm.ent && dm.done && coolRoom(dm.ent.n)) {
     const cr = release(dm);
-    for (let j = 0; j < cr.n; j++) cl.groups[0].push({ id: S.nextId++, tIn: S.t });
+    for (let j = 0; j < cr.n; j++) (c.cool.on ? cl.groups[0] : S.pickQ).push({ id: S.nextId++, tIn: S.t });
     cr.n = 0;
     if (S.toolDeficit > 0) { S.toolDeficit--; logEv("工装 #" + cr.id + " 下线（减少工装数）", ""); }
     else { cr.rem = c.ret; cr.dur = c.ret; S.ret.push(cr); }
   }
-  if (free(dm) && S.demQ.length && !isDown("demold")) take(dm, S.demQ.shift(), vt(c.demold));
+  if (free(dm) && S.demQ.length && !isDown("demold")) take(dm, S.demQ.shift(), tSample(c.demold.t));
 
-  /* ---- 出料主通道（倍速链） ---- */
+  /* ---- 出料主通道 ---- */
   if (!isDown("out")) S.out_ = S.out_.filter(cr => { cr.rem -= DT; if (cr.rem <= 0) { S.demQ.push(cr); return false; } return true; });
 
-  /* ---- 固化通道 ---- */
+  /* ---- 并联通道：工位序列，同步指进 或 各位独立放行 ---- */
   S.ch.forEach((ch, i) => {
-    const on = c.channels[i] && c.channels[i].on, chDown = isDown(`ch${i + 1}`);
-    tickSrv(ch.heat, chDown); tickSrv(ch.cool, chDown);
-    const exitSrv = c.mode === 2 ? ch.cool : ch.heat;
-    if (exitSrv.ent && exitSrv.done && !isDown("out") && S.t - S.lastOut >= c.gapOut) {
-      const cr = release(exitSrv); cr.ch = i; cr.rem = c.channels[i].tout; cr.dur = cr.rem; S.out_.push(cr); S.lastOut = S.t;
+    const chDown = isDown(`ch${i + 1}`);
+    const pd = kk => chDown || isDown(chId(i, kk));
+    ch.pos.forEach((p, kk) => {
+      const st = ch.posSt[kk];
+      if (pd(kk)) st.down += DT; else if (p && p.rem > 0) st.work += DT; else if (p) st.block += DT; else st.idle += DT;
+      if (p && p.rem > 0 && !pd(kk)) p.rem -= DT;
+    });
+    const outOK = () => !isDown("out") && S.t - S.lastOut >= c.outGap;
+    const toOut = p => { const cr = p.c; cr.ch = i; cr.rem = c.channels[i].tout; cr.dur = cr.rem; S.out_.push(cr); S.lastOut = S.t; };
+    if (c.chIndex === "sync") {
+      const any = ch.pos.some(Boolean) || ch.entry;
+      const allDone = ch.pos.every((p, kk) => !p || (p.rem <= 0 && !pd(kk)));
+      const lastOK = !ch.pos[K - 1] || outOK();
+      if (any && allDone && lastOK && !chDown) {
+        if (ch.pos[K - 1]) toOut(ch.pos[K - 1]);
+        for (let kk = K - 1; kk > 0; kk--) ch.pos[kk] = ch.pos[kk - 1];
+        ch.pos[0] = ch.entry ? { c: ch.entry, rem: 0 } : null; ch.entry = null;
+        ch.pos.forEach((p, kk) => { if (p) p.rem = tSample(c.chStages[kk].t); });
+      }
+    } else {
+      if (ch.pos[K - 1] && ch.pos[K - 1].rem <= 0 && !pd(K - 1) && outOK()) { toOut(ch.pos[K - 1]); ch.pos[K - 1] = null; }
+      for (let kk = K - 2; kk >= 0; kk--) {
+        const p = ch.pos[kk];
+        if (p && p.rem <= 0 && !pd(kk) && !ch.pos[kk + 1] && !pd(kk + 1)) { ch.pos[kk + 1] = p; p.rem = tSample(c.chStages[kk + 1].t); ch.pos[kk] = null; }
+      }
+      if (ch.entry && !ch.pos[0] && !pd(0)) { ch.pos[0] = { c: ch.entry, rem: tSample(c.chStages[0].t) }; ch.entry = null; }
     }
-    if (c.mode === 2 && ch.heat.ent && ch.heat.done && free(ch.cool) && !isDown(ch.cool.id) && !chDown) take(ch.cool, release(ch.heat), c.Tch);
-    // 通道入口等待位：工装提前到位，加热位一空即进（通道远近只产生延时，不占产能）
-    if (ch.entry && free(ch.heat) && !isDown(ch.heat.id) && !chDown) { take(ch.heat, ch.entry, c.Tch); ch.entry = null; }
   });
 
-  /* ---- 进料主通道：按派发策略选通道 ---- */
-  if (!isDown("feed")) S.feed = S.feed.filter(cr => {
-    cr.rem -= DT;
-    if (cr.rem <= 0) { const ch = S.ch[cr.ch]; ch.resv = false; ch.entry = cr; return false; }
-    return true;
-  });
-  if (S.feedQ.length && !isDown("feed") && S.t - S.lastFeed >= c.gapIn) {
+  /* ---- 进料主通道 ---- */
+  if (!isDown("feed")) S.feed = S.feed.filter(cr => { cr.rem -= DT; if (cr.rem <= 0) { const ch = S.ch[cr.ch]; ch.resv = false; ch.entry = cr; return false; } return true; });
+  if (S.feedQ.length && !isDown("feed") && S.t - S.lastFeed >= c.feedGap) {
     const idx = pickChannel();
-    if (idx >= 0) {
-      const cr = S.feedQ.shift(); cr.ch = idx; cr.rem = c.channels[idx].tin; cr.dur = cr.rem;
-      S.ch[idx].resv = true; S.feed.push(cr); S.lastFeed = S.t; S.rr = idx + 1;
-    }
+    if (idx >= 0) { const cr = S.feedQ.shift(); cr.ch = idx; cr.rem = c.channels[idx].tin; cr.dur = cr.rem; S.ch[idx].resv = true; S.feed.push(cr); S.lastFeed = S.t; S.rr = idx + 1; }
   }
 
-  /* ---- 预压 / 上料 ---- */
-  const pr = S.srv.pre;
-  tickSrv(pr);
-  if (pr.ent && pr.done && S.feedQ.length < c.buf.feedQ) S.feedQ.push(release(pr));
-  const lo = S.srv.load;
-  tickSrv(lo);
-  if (lo.ent && lo.done && free(pr) && !isDown("pre")) take(pr, release(lo), vt(c.pre));
-  if (free(lo) && S.retBuf.length && !isDown("load")) { const cr = S.retBuf.shift(); cr.n = N; take(lo, cr, vt(c.load)); }
+  /* ---- 上料段工位链（按工装） ---- */
+  for (let j = S.pre.length - 1; j >= 0; j--) {
+    const s = S.pre[j];
+    tickSrv(s);
+    if (s.ent && s.done) {
+      if (j === S.pre.length - 1) { if (S.feedQ.length < c.feedQ) S.feedQ.push(release(s)); }
+      else if (free(S.pre[j + 1]) && !isDown(S.pre[j + 1].id)) take(S.pre[j + 1], release(s), tSample(c.pre[j + 1].t));
+    }
+  }
+  const s0 = S.pre[0];
+  if (free(s0) && S.retBuf.length && !isDown(s0.id)) { const cr = S.retBuf.shift(); cr.n = N; take(s0, cr, tSample(c.pre[0].t)); }
 
   /* ---- 空工装回流 ---- */
   if (!isDown("ret")) S.ret = S.ret.filter(cr => { cr.rem -= DT; if (cr.rem <= 0) { S.retBuf.push(cr); return false; } return true; });
 }
-
+function finishPart() { S.out++; S.outTimes.push(S.t); const h = Math.floor(S.t / 3600); S.hourly[h] = (S.hourly[h] || 0) + 1; }
 function pickChannel() {
   const c = CFG, n = c.channels.length;
-  const ok = i => c.channels[i].on && !S.ch[i].resv && !S.ch[i].entry && !isDown(`ch${i + 1}.heat`) && !isDown(`ch${i + 1}`);
+  const ok = i => c.channels[i] && c.channels[i].on && !S.ch[i].resv && !S.ch[i].entry && !isDown(chId(i, 0)) && !isDown(`ch${i + 1}`);
   if (c.dispatch === "roundrobin") { for (let j = 0; j < n; j++) { const i = (S.rr + j) % n; if (ok(i)) return i; } return -1; }
   if (c.dispatch === "farthest") { for (let i = n - 1; i >= 0; i--) if (ok(i)) return i; return -1; }
   for (let i = 0; i < n; i++) if (ok(i)) return i;
   return -1;
 }
 
-/* ================= 目标 / 指令 ================= */
+/* ================= 目标 / 参数 / 动作 ================= */
 function targetName(id) {
-  const m = /^ch(\d+)(?:\.(heat|cool))?$/.exec(id);
-  if (m) return m[1] + "通道" + (m[2] === "heat" ? "加热位" : m[2] === "cool" ? "冷却位" : "(整通道)");
-  const mi = /^insp(\d+)$/.exec(id);
-  if (mi) { const s = CFG.insp.st[+mi[1] - 1]; return "检测工位" + mi[1] + (s && s.name ? "(" + s.name + ")" : ""); }
-  return { load: "上料工位", pre: "预压工位", feed: "进料主通道", out: "出料主通道", demold: "脱模工位", ret: "空工装回流线", cooler: "冷却通道", loader: "检测线上料机械手", insp: "检测线(整线移栽)", unload: "下料", visual: "目检", pack: "装箱" }[id] || id;
+  let m = /^ch(\d+)(?:\.(\d+))?$/.exec(id);
+  if (m) { const st = m[2] && CFG.chStages[+m[2] - 1]; return m[1] + "通道" + (m[2] ? (st ? st.name : "工位" + m[2]) : "(整通道)"); }
+  if ((m = /^insp(\d+)$/.exec(id))) { const s = CFG.insp.st[+m[1] - 1]; return "检测工位" + m[1] + (s && s.name ? "(" + s.name + ")" : ""); }
+  const st = CFG.pre.concat(CFG.post).find(s => s.id === id);
+  if (st) return st.name;
+  return { feed: "进料主通道", out: "出料主通道", demold: CFG.demold.name, ret: "空工装回流线", cooler: "冷却通道", loader: CFG.loader.name, insp: "检测线(整线移栽)" }[id] || id;
 }
 function allTargets() {
-  const t = ["load", "pre", "feed"];
-  CFG.channels.forEach((_, i) => t.push(`ch${i + 1}`, `ch${i + 1}.heat`, `ch${i + 1}.cool`));
-  t.push("out", "demold", "ret", "cooler", "loader", "insp");
+  const t = CFG.pre.map(s => s.id).concat(["feed"]);
+  CFG.channels.forEach((_, i) => { t.push(`ch${i + 1}`); CFG.chStages.forEach((_, k) => t.push(chId(i, k))); });
+  t.push("out", "demold", "ret");
+  if (CFG.cool.on) t.push("cooler");
+  t.push("loader", "insp");
   CFG.insp.st.forEach((s, i) => { if (s.on) t.push("insp" + (i + 1)); });
-  t.push("unload", "visual", "pack");
-  return t;
+  return t.concat(CFG.post.map(s => s.id));
 }
-
-// 可调参数登记表：AI 与本地解析共用
+// 数值参数（set 用）
 function paramList() {
   const c = CFG, L = [
-    ["load", "上料工位 工装周期", "秒/工装"], ["pre", "预压工位 工装周期", "秒/工装"], ["demold", "脱模工位 工装周期", "秒/工装"],
-    ["Tch", "通道占用周期 T_ch", "秒/工装"], ["gapIn", "进料主通道最小工装间距", "秒"], ["gapOut", "出料主通道最小工装间距", "秒"],
-    ["ret", "空工装回流时间", "秒"], ["tools", "工装数", "套"],
-    ["cool.fwd", "冷却通道每组前移时间", "秒"], ["cool.minStop", "冷却通道最短停顿", "秒"], ["cool.r1", "脱模机械手单件循环", "秒"],
-    ["cool.r2", "检测线上料机械手单件循环", "秒"], ["cool.req", "工艺要求最短冷却时间", "秒"],
-    ["insp.move", "检测线夹爪移栽时间", "秒"], ["unload", "下料单件时间", "秒"], ["visual", "目检单件时间", "秒"], ["place", "装箱摆入单件时间", "秒"],
-    ["perLayer", "每层件数", "件"], ["layers", "每箱层数", "层"], ["vari", "工时波动系数(0~0.3)", ""],
-    ["buf.feedQ", "预压后进料等待位数", "个"], ["buf.unl", "下料缓存", "件"], ["buf.vis", "目检缓存", "件"], ["buf.pack", "装箱缓存", "件"]
+    ["tools", "工装数", "套"], ["N", "每工装装载件数", "件"], ["feedGap", "进料主通道最小工装间距", "秒"], ["outGap", "出料主通道最小工装间距", "秒"],
+    ["ret", "空工装回流时间", "秒"], ["feedQ", "预压后进料等待位", "个"], ["postBuf", "人工段各工位前缓存", "件"], ["vari", "固定时间的全局工时波动系数", ""],
+    ["cool.fwd", "冷却通道每组前移时间", "秒"], ["cool.minStop", "冷却通道最短停顿", "秒"], ["cool.r1", "脱模机械手单件循环(仅理论计算)", "秒"], ["cool.req", "工艺要求最短冷却时间", "秒"],
+    ["cool.rows", "冷却通道排数", "排"], ["cool.cols", "冷却通道列数", "列"], ["cool.grp", "冷却通道每组件数", "件"],
+    ["insp.move", "检测线夹爪移栽时间", "秒"], ["perLayer", "每层件数", "件"], ["layers", "每箱层数", "层"]
   ];
-  c.insp.st.forEach((s, i) => L.push([`insp.${i + 1}.t`, "检测工位" + (i + 1) + (s.name ? "(" + s.name + ")" : "") + " 作业时间", "秒"]));
-  c.channels.forEach((x, i) => { L.push([`ch${i + 1}.tin`, (i + 1) + "通道 进料输送时间", "秒"]); L.push([`ch${i + 1}.tout`, (i + 1) + "通道 出料输送时间", "秒"]); });
-  c.pack.forEach((p, i) => L.push([`pack.${i + 1}.t`, "装箱周期动作" + (i + 1) + "(" + p.name + ") 单次时间", "秒"]));
-  return L.map(([key, label, unit]) => ({ key, label, unit, value: getParam(key) }));
+  c.channels.forEach((x, i) => { L.push([`channels.${i}.tin`, (i + 1) + "通道 进料输送时间", "秒"]); L.push([`channels.${i}.tout`, (i + 1) + "通道 出料输送时间", "秒"]); });
+  c.pack.forEach((p, i) => L.push([`pack.${i}.t`, "装箱周期动作(" + p.name + ") 单次时间", "秒"]));
+  return L.map(([key, label, unit]) => ({ key, label, unit, value: getPath(CFG, key) }));
 }
-function ref(key) {
-  const c = CFG; let m;
-  if ((m = /^insp\.(\d+)\.t$/.exec(key))) return [c.insp.st[+m[1] - 1], "t"];
-  if ((m = /^ch(\d+)\.(tin|tout)$/.exec(key))) return [c.channels[+m[1] - 1], m[2]];
-  if ((m = /^pack\.(\d+)\.t$/.exec(key))) return [c.pack[+m[1] - 1], "t"];
-  if ((m = /^(cool|insp|buf)\.(\w+)$/.exec(key))) return [c[m[1]], m[2]];
-  if (key in c && typeof c[key] === "number") return [c, key];
-  return [null, null];
+// 放行时间（各工位）
+function timedList() {
+  const c = CFG, L = [];
+  c.pre.forEach((s, j) => L.push({ path: `pre.${j}.t`, name: s.name, grp: "上料段" }));
+  c.chStages.forEach((s, k) => L.push({ path: `chStages.${k}.t`, name: s.name, grp: "通道工位" }));
+  L.push({ path: "demold.t", name: c.demold.name, grp: "脱模" }, { path: "loader.t", name: c.loader.name, grp: "检测上料" });
+  c.insp.st.forEach((s, j) => { if (s.on) L.push({ path: `insp.st.${j}.t`, name: s.name || "检测工位" + (j + 1), grp: "检测线" }); });
+  c.post.forEach((s, j) => L.push({ path: `post.${j}.t`, name: s.name, grp: "人工段" }));
+  return L.map(x => ({ ...x, t: getPath(CFG, x.path) }));
 }
-function getParam(key) { const [o, k] = ref(key); return o ? o[k] : undefined; }
-function setParam(key, val) {
-  const [o, k] = ref(key);
-  if (!o || !isFinite(val)) return false;
-  const old = o[k];
-  if (key === "tools") return setTools(Math.round(val));
-  o[k] = +val;
-  if (key === "insp.move" || /^insp\.\d+\.t$/.test(key)) { /* 下一个节拍生效 */ }
-  logEv(`参数调整：${(paramList().find(p => p.key === key) || { label: key }).label} ${old} → ${val}`, "ai");
-  saveCfg(); return true;
+function getPath(o, path) { return String(path).split(".").reduce((a, k) => a == null ? undefined : a[/^\d+$/.test(k) ? +k : k], o); }
+function setPath(o, path, val) {
+  const ks = String(path).split("."); let x = o;
+  for (let i = 0; i < ks.length - 1; i++) {
+    const k = /^\d+$/.test(ks[i]) ? +ks[i] : ks[i];
+    if (x[k] == null || typeof x[k] !== "object") x[k] = /^\d+$/.test(ks[i + 1]) ? [] : {};
+    x = x[k];
+  }
+  const last = /^\d+$/.test(ks[ks.length - 1]) ? +ks[ks.length - 1] : ks[ks.length - 1];
+  if (val === null && Array.isArray(x)) x.splice(last, 1); else x[last] = val;
+}
+// 统一的配置修改入口：结构变了就重建模拟，时间/参数类即时生效
+function patchCfg(patches, label) {
+  const before = structSig(CFG), oldTools = CFG.tools;
+  const draft = clone(CFG);
+  for (const p of patches) {
+    if (!p || typeof p.path !== "string" || !p.path) throw new Error("patch 缺少 path");
+    if (p.op === "insert") { const arr = getPath(draft, p.path); if (!Array.isArray(arr)) throw new Error(p.path + " 不是数组"); arr.splice(Math.max(0, Math.min(arr.length, p.index ?? arr.length)), 0, p.value); }
+    else if (p.op === "remove") { const arr = getPath(draft, p.path); if (!Array.isArray(arr)) throw new Error(p.path + " 不是数组"); arr.splice(p.index, 1); }
+    else setPath(draft, p.path, p.value);
+  }
+  const next = normCfg(draft);
+  if (!next.pre.length) throw new Error("上料段至少保留一个工位");
+  const structural = structSig(next) !== before;
+  CFG = next; saveCfg();
+  if (structural) { const t = S.t; resetSim(); logEv(`线体结构已修改（${label || "配置"}），模拟已重建；原运行 ${fmtDur(t)}`, "ai"); }
+  else if (CFG.tools !== oldTools) { const n = CFG.tools; CFG.tools = oldTools; setTools(n); }
+  renderCfg();
+  return structural;
 }
 function setTools(n) {
   const cur = CFG.tools; if (n === cur || n < 1) return n === cur;
   CFG.tools = n;
-  if (n > cur) { for (let i = 0; i < n - cur; i++) S.retBuf.push({ id: S.nextId++, n: 0 }); }
+  if (n > cur) for (let i = 0; i < n - cur; i++) S.retBuf.push({ id: S.nextId++, n: 0 });
   else { let d = cur - n; while (d > 0 && S.retBuf.length) { S.retBuf.pop(); d--; } S.toolDeficit += d; }
   logEv(`工装数 ${cur} → ${n} 套` + (S.toolDeficit ? `（其余 ${S.toolDeficit} 套在线，脱模后下线）` : ""), "ai");
   saveCfg(); return true;
 }
+const targetAlias = t => String(t || "").replace(/^ch(\d+)\.heat$/, "ch$1.1").replace(/^ch(\d+)\.cool$/, "ch$1.2");
 
-// 统一动作执行：{op, target, value, minutes, text, at}
+// 动作：{op, target, value, minutes, text, at, path, index}
 function applyAction(a, src = "") {
-  if (a.at && a.at > 0) {
-    S.scheduled.push({ at: S.t + a.at * 60, act: { ...a, at: 0 } });
-    logEv(`已计划：${a.at} 分钟后 ${describe({ ...a, at: 0 })}`, "ai"); return true;
-  }
-  const valid = new Set(allTargets());
-  switch (a.op) {
-    case "stop": {
-      if (!valid.has(a.target)) return fail("未知工位 " + a.target);
-      const until = a.minutes > 0 ? S.t + a.minutes * 60 : Infinity;
-      S.down[a.target] = { until, reason: a.text || "停机" };
-      logEv(`${targetName(a.target)} ${a.text || "停机"}${a.minutes > 0 ? "，预计 " + a.minutes + " 分钟" : "，待人工恢复"}`, "ng");
-      return true;
+  a = Object.assign({ target: "", value: 0, minutes: 0, text: "", at: 0 }, a);
+  if (a.at > 0) { S.scheduled.push({ at: S.t + a.at * 60, act: { ...a, at: 0 } }); logEv(`已计划：${a.at} 分钟后 ${describe({ ...a, at: 0 })}`, "ai"); return true; }
+  const tg = targetAlias(a.target), valid = new Set(allTargets());
+  const fail = msg => { logEv("指令未执行：" + msg, "ng"); return false; };
+  try {
+    switch (a.op) {
+      case "stop": {
+        if (!valid.has(tg)) return fail("未知工位 " + a.target);
+        S.down[tg] = { until: a.minutes > 0 ? S.t + a.minutes * 60 : Infinity, reason: a.text || "停机" };
+        logEv(`${targetName(tg)} ${a.text || "停机"}${a.minutes > 0 ? "，预计 " + a.minutes + " 分钟" : "，待恢复"}`, "ng"); return true;
+      }
+      case "resume":
+        if (tg === "all") { S.down = {}; logEv("全部工位恢复运行", "ok"); return true; }
+        if (!S.down[tg]) return fail(targetName(tg) + " 当前未停机");
+        delete S.down[tg]; logEv(targetName(tg) + " 恢复运行", "ok"); return true;
+      case "set": {
+        const v = +a.value; if (!isFinite(v)) return fail("数值无效");
+        if (a.target === "tools") return setTools(Math.round(v));
+        if (getPath(CFG, a.target) === undefined) return fail("未知参数 " + a.target);
+        const old = getPath(CFG, a.target);
+        patchCfg([{ path: a.target, value: (typeof old === "object" && old && old.type) ? T(v) : v }], a.target);
+        logEv(`参数调整：${a.target} ${typeof old === "object" ? tText(old) : old} → ${v}`, "ai"); return true;
+      }
+      case "set_time": {
+        const old = getPath(CFG, a.path || a.target);
+        if (!old || typeof old !== "object" || !("type" in old)) return fail("不是放行时间字段 " + (a.path || a.target));
+        const nt = normT(a.value);
+        patchCfg([{ path: a.path || a.target, value: nt }], "放行时间");
+        logEv(`放行逻辑：${timedLabel(a.path || a.target)} ${tText(old)} → ${T_NAMES[nt.type]} ${tText(nt)}`, "ai"); return true;
+      }
+      case "patch": case "insert": case "remove": {
+        const st = patchCfg([{ op: a.op === "patch" ? "set" : a.op, path: a.path, value: a.value, index: a.index }], a.text || a.path);
+        logEv(`配置修改：${a.text || a.path}${st ? "（结构变更，已重建）" : ""}`, "ai"); return true;
+      }
+      case "channel_on": case "channel_off": {
+        const m = /^ch(\d+)/.exec(tg); const ch = m && CFG.channels[+m[1] - 1];
+        if (!ch) return fail("未知通道 " + a.target);
+        ch.on = a.op === "channel_on"; saveCfg(); logEv(`${m[1]}通道 ${ch.on ? "开启" : "关闭（在制工装做完后不再派料）"}`, "ai"); return true;
+      }
+      case "speed": setSpeed(+a.value); return true;
+      case "run": setRun(true); return true;
+      case "pause": setRun(false); return true;
+      case "reset": resetSim(); return true;
+      case "fast_forward": fastForward((+a.minutes || +a.value || 60) * 60); return true;
+      case "none": return true;
     }
-    case "resume":
-      if (a.target === "all") { Object.keys(S.down).forEach(k => delete S.down[k]); logEv("全部工位恢复运行", "ok"); return true; }
-      if (!S.down[a.target]) return fail(targetName(a.target) + " 当前未停机");
-      delete S.down[a.target]; logEv(targetName(a.target) + " 恢复运行", "ok"); return true;
-    case "set": if (!setParam(a.target, +a.value)) return fail("无法设置参数 " + a.target); return true;
-    case "set_text":
-      if (a.target === "dispatch" && ["nearest", "roundrobin", "farthest"].includes(a.text)) { CFG.dispatch = a.text; logEv("通道派发策略 → " + dispName(a.text), "ai"); saveCfg(); renderCfg(); return true; }
-      { const m = /^insp\.(\d+)\.name$/.exec(a.target); if (m && CFG.insp.st[+m[1] - 1]) { CFG.insp.st[+m[1] - 1].name = a.text; saveCfg(); return true; } }
-      return fail("无法设置 " + a.target);
-    case "channel_on": case "channel_off": {
-      const m = /^ch(\d+)/.exec(a.target); const ch = m && CFG.channels[+m[1] - 1];
-      if (!ch) return fail("未知通道 " + a.target);
-      ch.on = a.op === "channel_on"; logEv(`${m[1]}通道 ${ch.on ? "开启" : "关闭（在制工装做完后不再派料）"}`, "ai"); saveCfg(); return true;
-    }
-    case "speed": setSpeed(+a.value); return true;
-    case "run": setRun(true); return true;
-    case "pause": setRun(false); return true;
-    case "reset": resetSim(); return true;
-    case "fast_forward": fastForward((+a.minutes || +a.value || 60) * 60); return true;
-    case "none": return true;
-  }
+  } catch (e) { return fail(e.message); }
   return fail("未知动作 " + a.op);
-  function fail(msg) { logEv("指令未执行：" + msg, "ng"); return false; }
 }
+function timedLabel(path) { const x = timedList().find(t => t.path === path); return x ? x.grp + "·" + x.name : path; }
 function describe(a) {
-  const t = targetName(a.target);
-  return ({ stop: `${t} 停机${a.minutes > 0 ? " " + a.minutes + " 分钟" : ""}${a.text ? "（" + a.text + "）" : ""}`, resume: a.target === "all" ? "全部恢复" : `${t} 恢复`,
-    set: `${(paramList().find(p => p.key === a.target) || { label: a.target }).label} = ${a.value}`, set_text: `${a.target} = ${a.text}`,
-    channel_on: `开启 ${t}`, channel_off: `关闭 ${t}`, speed: `倍速 ${a.value}×`, run: "运行", pause: "暂停", reset: "重置", fast_forward: `快进 ${a.minutes || a.value} 分钟`, none: "无动作" })[a.op] || a.op;
+  const t = targetName(targetAlias(a.target));
+  return ({
+    stop: `${t} 停机${a.minutes > 0 ? " " + a.minutes + " 分钟" : ""}${a.text ? "（" + a.text + "）" : ""}`, resume: a.target === "all" ? "全部恢复" : `${t} 恢复`,
+    set: `${(paramList().find(p => p.key === a.target) || { label: a.target }).label} = ${a.value}`,
+    set_time: `${timedLabel(a.path || a.target)} 放行 = ${tText(a.value)}`,
+    patch: `修改 ${a.text || a.path}`, insert: `插入 ${a.text || a.path}`, remove: `删除 ${a.text || a.path}`,
+    channel_on: `开启 ${t}`, channel_off: `关闭 ${t}`, speed: `倍速 ${a.value}×`, run: "运行", pause: "暂停", reset: "重置",
+    fast_forward: `快进 ${a.minutes || a.value} 分钟`, none: "无动作"
+  })[a.op] || a.op;
 }
 const dispName = d => ({ nearest: "就近优先(1#先)", roundrobin: "轮流派发", farthest: "远端优先" })[d] || d;
 
-/* ================= 本地指令解析（无 API Key 时） ================= */
+/* ================= 本地指令解析（无 API Key 或接口失败时） ================= */
+function parseTimeSpec(s) {
+  let m;
+  if ((m = /(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*[~～\-—–到至]\s*(\d+(?:\.\d+)?)/.exec(s))) return { type: "uniform", min: +m[1], max: +m[2] };
+  if ((m = /(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*[±]\s*(\d+(?:\.\d+)?)/.exec(s))) return { type: "normal", mean: +m[1], sd: +m[2] };
+  if ((m = /均值\s*(\d+(?:\.\d+)?).*?(?:标准差|σ|sd)\s*(\d+(?:\.\d+)?)/i.exec(s))) return { type: "normal", mean: +m[1], sd: +m[2] };
+  return null;
+}
+function findTimed(s) {
+  // 最长名字优先匹配，避免“冷却”吃掉“冷却1”
+  const L = timedList().slice().sort((a, b) => b.name.length - a.name.length);
+  return L.find(x => x.name && s.includes(x.name)) || null;
+}
 function localParse(txt) {
-  const acts = [], s = txt.replace(/\s+/g, "");
+  const acts = [], s0 = txt.replace(/\s+/g, "");
   let at = 0, m;
-  if ((m = /(\d+(?:\.\d+)?)(分钟|min|小时|h)后/.exec(s))) at = +m[1] * (/小时|h/.test(m[2]) ? 60 : 1);
-  const body = at ? s.replace(m[0], "") : s;
+  if ((m = /(\d+(?:\.\d+)?)(分钟|min|小时|h)后/.exec(s0))) at = +m[1] * (/小时|h/.test(m[2]) ? 60 : 1);
+  const body = at ? s0.replace(m[0], "") : s0;
+  const c = CFG;
+
+  // 1) 通道工位序列：增加/删除/改为 A-B-C
+  if (/通道/.test(body) && /(增加|新增|加一个|加个|减少|删除|去掉|变成|改为|改成)/.test(body) && /(工位|位|冷却|加热|固化)/.test(body) && !/\d+[#号]?通道/.test(body)) {
+    let names = null;
+    if ((m = /(?:变成|改为|改成|为)[“"「]?([^，。,"”」]+?[-－—→>][^，。,"”」]+)/.exec(body))) names = m[1].split(/[-－—→>]+/).map(x => x.trim()).filter(Boolean);
+    const old = c.chStages;
+    if (names) {
+      const coolT = (old.slice().reverse().find(x => /冷却/.test(x.name)) || old[old.length - 1]).t;
+      const stages = names.map(nm => { const hit = old.find(x => x.name === nm) || old.find(x => nm.includes(x.name) || x.name.includes(nm)); return { name: nm, t: hit ? hit.t : clone(coolT) }; });
+      acts.push({ op: "patch", path: "chStages", value: stages, text: "通道工位改为 " + names.join("→") });
+    } else if ((m = /(增加|新增|加)(?:一个|个)?(.+?)(?:工位|位)/.exec(body))) {
+      const nm = m[2].replace(/^(固化)?通道/, "") || "冷却";
+      const stages = clone(old), base = stages.slice().reverse().find(x => x.name.includes(nm.replace(/\d+$/, ""))) || stages[stages.length - 1];
+      const same = stages.filter(x => x.name.replace(/\d+$/, "") === nm.replace(/\d+$/, ""));
+      if (same.length === 1 && !/\d$/.test(same[0].name)) same[0].name += "1";
+      stages.push({ name: /\d$/.test(nm) ? nm : nm + (same.length + 1), t: clone(base.t) });
+      acts.push({ op: "patch", path: "chStages", value: stages, text: "通道增加工位 " + stages[stages.length - 1].name });
+    } else if ((m = /(删除|去掉|减少)(?:一个)?(.+?)(?:工位|位)/.exec(body))) {
+      const k = old.findIndex(x => x.name === m[2]) >= 0 ? old.findIndex(x => x.name === m[2]) : old.length - 1;
+      if (old.length > 1) acts.push({ op: "remove", path: "chStages", index: k, text: "通道删除工位 " + old[k].name });
+    }
+    if (acts.length) { acts.forEach(a => a.at = at); return acts; }
+  }
+  // 2) 放行时间波动 / 固定
+  const ts = parseTimeSpec(body), tgtT = findTimed(body);
+  if (tgtT && (ts || /(固定|改为|改成|设为|调到|调整为)\s*\d/.test(body)) && !/(停|维修|故障|保养)/.test(body)) {
+    let spec = ts;
+    if (!spec) { m = /(?:固定为?|改为|改成|设为|调到|调整为)(\d+(?:\.\d+)?)/.exec(body); spec = m ? T(+m[1]) : null; }
+    if (spec) { acts.push({ op: "set_time", path: tgtT.path, value: spec, at }); return acts; }
+  }
+  // 3) 上料段/人工段插入、删除工位
+  if ((m = /在(.+?)(之后|后面|后|之前|前面|前)(?:增加|新增|加)(?:一个|个)?(.+?)(?:工位|工序|工站)?(?:[，,]?(?:节拍|时间|放行)?(\d+(?:\.\d+)?)(?:s|秒))?$/.exec(body))) {
+    const ref = m[1], after = /后/.test(m[2]), nm = m[3].replace(/(工位|工序|工站)$/, ""), t = m[4] ? +m[4] : 30;
+    for (const seg of ["pre", "post"]) {
+      const j = c[seg].findIndex(x => x.name.includes(ref) || ref.includes(x.name.replace(/\(.*\)/, "")));
+      if (j >= 0) { acts.push({ op: "insert", path: seg, index: after ? j + 1 : j, value: { name: nm, t: T(t) }, text: `${seg === "pre" ? "上料段" : "人工段"}插入「${nm}」${t}s`, at }); return acts; }
+    }
+  }
+  if ((m = /(?:删除|去掉|取消)(.+?)(?:工位|工序|工站)/.exec(body))) {
+    for (const seg of ["pre", "post"]) {
+      const j = c[seg].findIndex(x => x.name.includes(m[1]) || m[1].includes(x.name));
+      if (j >= 0) { acts.push({ op: "remove", path: seg, index: j, text: `删除「${c[seg][j].name}」`, at }); return acts; }
+    }
+  }
+  // 4) 流转方向 / 布局 / 放行方式
+  if (/(镜像|从右(?:向|到|往)左|右进左出)/.test(body)) acts.push({ op: "patch", path: "layout.mirror", value: true, text: "流转方向改为从右向左" });
+  else if (/(从左(?:向|到|往)右|左进右出|取消镜像)/.test(body)) acts.push({ op: "patch", path: "layout.mirror", value: false, text: "流转方向改为从左向右" });
+  if (/1[#号]?通道.*(最远|顶部|上方|最上)/.test(body)) acts.push({ op: "patch", path: "layout.ch1", value: "far", text: "1#通道放在远端" });
+  else if (/1[#号]?通道.*(最近|底部|下方|最下)/.test(body)) acts.push({ op: "patch", path: "layout.ch1", value: "near", text: "1#通道放在近端" });
+  if (/同步指进|同步放行/.test(body)) acts.push({ op: "patch", path: "chIndex", value: "sync", text: "通道改为同步指进" });
+  else if (/(独立放行|异步|各自放行|各位独立)/.test(body)) acts.push({ op: "patch", path: "chIndex", value: "async", text: "通道改为各位独立放行" });
+  if (/关闭冷却通道|取消冷却通道|不用冷却通道/.test(body)) acts.push({ op: "patch", path: "cool.on", value: false, text: "取消冷却通道" });
+  else if (/(启用|开启|恢复)冷却通道/.test(body)) acts.push({ op: "patch", path: "cool.on", value: true, text: "启用冷却通道" });
+  if (acts.length) { acts.forEach(a => a.at = at); return acts; }
+
+  // 5) 停机 / 恢复 / 改节拍 / 倍速 / 开关通道
   let minutes = 0;
   if ((m = /(\d+(?:\.\d+)?)(分钟|min|小时|h)/.exec(body))) minutes = +m[1] * (/小时|h/.test(m[2]) ? 60 : 1);
   const reason = (/(维修|故障|保养|换型|点检|清洁|调试|停机|暂停|停)/.exec(body) || [])[1] || "停机";
-  // 目标识别
   const tgts = [];
-  const chRe = /(\d+)[#号]?通道(加热|冷却)?/g;
-  while ((m = chRe.exec(body))) tgts.push(`ch${m[1]}` + (m[2] === "加热" ? ".heat" : m[2] === "冷却" ? ".cool" : ""));
-  const alias = [["检测线上料", "loader"], ["上料机械手", "loader"], ["机械手", "loader"], ["进料主通道", "feed"], ["出料主通道", "out"], ["回流", "ret"],
-    ["冷却通道", "cooler"], ["冷却线", "cooler"], ["冷却段", "cooler"], ["检测线", "insp"], ["检测段", "insp"], ["上料", "load"], ["预压", "pre"], ["脱模", "demold"],
-    ["下料", "unload"], ["目检", "visual"], ["装箱", "pack"]];
-  let rest = body.replace(chRe, "");
-  CFG.insp.st.forEach((st, i) => { if (st.on && st.name && rest.includes(st.name)) { tgts.push("insp" + (i + 1)); rest = rest.replace(st.name, ""); } });
-  while ((m = /检测工位(\d+)/.exec(rest))) { tgts.push("insp" + m[1]); rest = rest.replace(m[0], ""); }
-  for (const [k, id] of alias) if (rest.includes(k)) { tgts.push(id); rest = rest.split(k).join(""); }
+  let rest = body;
+  const stageNames = c.chStages.map((x, k) => ({ n: x.name, k })).sort((a, b) => b.n.length - a.n.length);
+  rest = rest.replace(/(\d+)[#号]?通道([^\d，。,]*)/g, (all, no, tail) => {
+    let k = -1;
+    const st = stageNames.find(x => tail.includes(x.n));
+    if (st) k = st.k; else if (/加热|固化/.test(tail)) k = c.chStages.findIndex(x => /加热|固化/.test(x.name)); else if (/冷却/.test(tail)) k = c.chStages.findIndex(x => /冷却/.test(x.name));
+    tgts.push(`ch${no}` + (k >= 0 ? "." + (k + 1) : "")); return " ";
+  });
+  CFG.insp.st.forEach((st, i) => { if (st.on && st.name && rest.includes(st.name)) { tgts.push("insp" + (i + 1)); rest = rest.replace(st.name, " "); } });
+  while ((m = /检测工位(\d+)/.exec(rest))) { tgts.push("insp" + m[1]); rest = rest.replace(m[0], " "); }
+  const named = [[CFG.loader.name, "loader"], ["检测线上料", "loader"], ["上料机械手", "loader"], ["机械手", "loader"], ["进料主通道", "feed"], ["出料主通道", "out"], ["回流", "ret"],
+    ["冷却通道", "cooler"], ["冷却线", "cooler"], ["检测线", "insp"], ["检测段", "insp"], [CFG.demold.name, "demold"], ["脱模", "demold"]]
+    .concat(c.pre.map(x => [x.name, x.id]), c.post.map(x => [x.name.replace(/\(.*\)/, ""), x.id]))
+    .sort((a, b) => b[0].length - a[0].length);
+  for (const [k, id] of named) if (k && rest.includes(k)) { if (!tgts.includes(id)) tgts.push(id); rest = rest.split(k).join(" "); }
 
-  if ((m = /(\d+)倍速|倍速(?:调到|改为|设为)?(\d+)|(\d+)[x×]/.exec(body))) { acts.push({ op: "speed", value: +(m[1] || m[2] || m[3]) }); }
+  if ((m = /(\d+)倍速|倍速(?:调到|改为|设为)?(\d+)|(\d+)[x×]/.exec(body))) acts.push({ op: "speed", value: +(m[1] || m[2] || m[3]) });
   if (/全部恢复|全线恢复|都恢复/.test(body)) acts.push({ op: "resume", target: "all" });
   else if (/恢复|修好|修复|开机/.test(body) && tgts.length) tgts.forEach(t => acts.push({ op: "resume", target: t }));
   else if (/(开启|打开|启用)/.test(body) && /通道/.test(body) && tgts.length) tgts.forEach(t => acts.push({ op: "channel_on", target: t.split(".")[0] }));
   else if (/(关闭|停用)/.test(body) && /通道/.test(body) && !/维修|故障/.test(body) && tgts.length) tgts.forEach(t => acts.push({ op: "channel_off", target: t.split(".")[0] }));
   else if ((m = /工装(?:数|数量)?(?:改为|改成|设为|调到|调整为|增加到|减少到|=)(\d+)/.exec(body))) acts.push({ op: "set", target: "tools", value: +m[1] });
-  else if ((m = /(?:节拍|时间|周期|工时)(?:改为|改成|设为|调到|调整为|缩短到|延长到|=)(\d+(?:\.\d+)?)/.exec(body))) {
-    const v = +m[1];
-    const map = { load: "load", pre: "pre", demold: "demold", loader: "cool.r2", unload: "unload", visual: "visual", pack: "place", cooler: "cool.fwd", insp: "insp.move", ret: "ret" };
-    if (/通道/.test(body) && /T_?ch|占用|固化|加热/.test(body + "加热")) acts.push({ op: "set", target: "Tch", value: v });
-    tgts.forEach(t => { const mi = /^insp(\d+)$/.exec(t); const key = mi ? `insp.${mi[1]}.t` : map[t]; if (key) acts.push({ op: "set", target: key, value: v }); });
-  }
+  else if ((m = /(?:节拍|时间|周期|工时|放行)(?:改为|改成|设为|调到|调整为|缩短到|延长到|=)(\d+(?:\.\d+)?)/.exec(body)) && tgtT) acts.push({ op: "set_time", path: tgtT.path, value: T(+m[1]) });
   else if (/(维修|故障|保养|换型|点检|清洁|调试|停机|暂停|停)/.test(body) && tgts.length) tgts.forEach(t => acts.push({ op: "stop", target: t, minutes, text: reason }));
   else if (/^(运行|开始|启动)$/.test(body)) acts.push({ op: "run" });
   else if (/^(暂停|停止)(模拟)?$/.test(body)) acts.push({ op: "pause" });
   else if (/重置/.test(body)) acts.push({ op: "reset" });
-  if ((m = /派发|派料|分配/.exec(body))) {
+  if (/派发|派料|分配/.test(body)) {
     const d = /轮流|轮询|均衡/.test(body) ? "roundrobin" : /远/.test(body) ? "farthest" : /近/.test(body) ? "nearest" : "";
-    if (d) acts.push({ op: "set_text", target: "dispatch", text: d });
+    if (d) acts.push({ op: "patch", path: "dispatch", value: d, text: "通道派发 " + dispName(d) });
   }
   acts.forEach(a => { a.at = at; });
   return acts;
 }
 
-/* ================= AI（Claude Messages API，浏览器直连） ================= */
-const AI_TOOL = {
-  name: "apply_actions",
-  description: "对线体模拟执行一组干预动作，并给用户一句中文答复。即使只回答问题、无需动作，也调用本工具并让 actions 为空数组。",
-  strict: true,
-  input_schema: {
-    type: "object", additionalProperties: false, required: ["reply", "actions"],
-    properties: {
-      reply: { type: "string", description: "给现场技术员的简短中文答复：执行了什么、预计影响（例如对线体节拍/产出的影响）。" },
-      actions: {
-        type: "array",
-        items: {
-          type: "object", additionalProperties: false, required: ["op", "target", "value", "minutes", "text", "at"],
-          properties: {
-            op: { type: "string", enum: ["stop", "resume", "set", "set_text", "channel_on", "channel_off", "speed", "run", "pause", "reset", "fast_forward", "none"] },
-            target: { type: "string", description: "工位 id（stop/resume/channel_*）或参数 key（set/set_text）；不需要时填空字符串。resume 全部恢复填 all。" },
-            value: { type: "number", description: "set 的新数值、speed 的倍速；不需要时填 0。" },
-            minutes: { type: "number", description: "stop 的停机时长(分钟，0=直到恢复指令)；fast_forward 的快进分钟数；其他填 0。" },
-            text: { type: "string", description: "stop 的原因(维修/故障/换型等)；set_text 的文本值；其他填空字符串。" },
-            at: { type: "number", description: "延迟执行：从当前模拟时间起多少分钟后执行；立即执行填 0。" }
-          }
-        }
-      }
-    }
-  }
-};
-const AI_SYSTEM = `你是 LSX 设备工程部的线体模拟助手，嵌在一个「零件/工装流转模拟」网页里。现场技术员用中文下指令，你通过 apply_actions 工具干预模拟。
+/* ================= 大模型接口（MiMo / OpenAI 兼容 或 Claude） ================= */
+const AI_SYSTEM = `你是 LSX 设备工程部的线体模拟助手，嵌在「零件/工装流转模拟」网页里。现场技术员用中文下指令，你只输出一个 JSON 对象来干预模拟，不输出其他文字。
 
-线体结构（定/转子自粘钢固化线）：上料工位(人工把 N 件放入工装) → 预压 → 进料主通道(倍速链，按派发策略把工装送到空闲通道) → 固化通道并联(每通道：加热位 + 冷却位，同步指进，各占一个通道占用周期 T_ch) → 出料主通道 → 脱模工位(机械手取件放入冷却通道；空工装经回流线回上料) → 冷却通道(滚筒带，装满一组且出口组取空后整体前移一组) → 检测线上料机械手 → 同步检测线(夹爪等距移栽，全部工位做完才一起移栽) → 下料 → 目检 → 装箱(含每层/每箱周期动作) 。时间单位均为秒，工装周期类参数是“秒/工装”。
+线体模型（模板拓扑，可改各段内容）：
+上料段工位链 pre[]（按工装作业，第一个工位把 N 件装入空工装）→ 进料主通道（按 dispatch 派发到空闲通道，channels[i].tin 为输送时间）→ 并联通道 channels[]，每个通道内依次经过 chStages[] 工位（例：加热固化→冷却），chIndex="sync" 表示通道内各工位同步指进（全部到时才一起前移），"async" 表示各工位到时且下一位空就独立放行 → 出料主通道 → 脱模 demold（零件进冷却通道，空工装经回流线 ret 秒回上料段）→ 冷却通道 cool（rows×cols，每组 grp 件，入口组装满且出口组取空后整体前移；cool.on=false 表示不用冷却通道）→ 检测线上料机械手 loader → 同步检测线 insp（move 为夹爪移栽秒数，st[] 各工位）→ 人工段工位链 post[]（pack=true 的工位叠加装箱周期动作 pack[]）→ 成品。
+布局：layout.mirror=true 表示整线流向从右向左（镜像）；layout.ch1="near"/"far" 表示 1#通道在靠近上料/脱模一端还是远端。
 
-动作规则：
-- 停机/维修/故障/换型 → op=stop，target 为工位 id，minutes 为时长（未说明时长填 0 表示直到恢复），text 写原因。“1通道加热工位”= ch1.heat，“1通道冷却位”= ch1.cool，“整个1通道”= ch1。
-- 恢复 → op=resume。
-- 改节拍、改时间、改工装数、改缓存等 → op=set，target 为参数 key，value 为新值。“缩短 10%”之类请按当前值换算成具体数值。
-- 通道派发策略 → op=set_text，target=dispatch，text 取 nearest(就近优先) / roundrobin(轮流) / farthest(远端优先)。
-- 开/关通道（产能计划层面，不是故障）→ channel_on / channel_off，target=chN。
-- “X分钟后…”→ 在对应动作里填 at=X。
-- 倍速、运行、暂停、重置、快进 → speed / run / pause / reset / fast_forward。
-- 只是询问（瓶颈在哪、为什么堵、产出多少）时 actions 为空，用 reply 依据下面给出的实时状态回答，按“现象 → 原因 → 建议”简洁作答，不编造状态中没有的数据。
-- 指令有歧义、找不到对应工位或参数时，不要猜，actions 留空并在 reply 中说明需要确认什么。
-每次都调用 apply_actions 工具。`;
+放行时间 TimeSpec 写法：{"type":"fixed","v":900} | {"type":"uniform","min":900,"max":1000}（区间内均匀波动）| {"type":"normal","mean":950,"sd":30} | {"type":"tri","min":900,"mode":950,"max":1000}。
 
-let sdkPromise = null;
-function loadSDK() {
-  // 浏览器端按需加载官方 TypeScript SDK（固定版本）
-  if (!sdkPromise) sdkPromise = import("https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.135.0/+esm").then(m => m.default || m.Anthropic);
-  return sdkPromise;
-}
-const AI = Object.assign({ key: "", base: "", model: "claude-opus-5-5" }, store.get("lsx-sim-ai") || {});
-const chatHist = [];   // 只追加的文字历史
+输出格式（必须是合法 JSON）：
+{"reply":"给技术员的简短中文答复：做了什么、预计对线体节拍/产出的影响","actions":[动作...]}
+
+动作（字段按需填写）：
+- {"op":"stop","target":工位id,"minutes":时长(0=直到恢复),"text":"维修/故障/换型等原因","at":延迟分钟}
+- {"op":"resume","target":工位id 或 "all"}
+- {"op":"set_time","path":放行时间路径,"value":TimeSpec}   // 调某工位放行时间/放行逻辑，路径见「放行时间清单」
+- {"op":"set","target":参数key,"value":数值}               // 数值参数，见「数值参数清单」
+- {"op":"patch","path":配置路径,"value":任意JSON,"text":"一句话说明"}   // 改结构/方向/逻辑，如 chStages、pre、post、chIndex、layout.mirror、layout.ch1、dispatch、cool.on、insp.st
+- {"op":"insert","path":数组路径,"index":插入位置,"value":元素,"text":"说明"} / {"op":"remove","path":数组路径,"index":序号,"text":"说明"}
+- {"op":"channel_on"|"channel_off","target":"chN"}
+- {"op":"speed","value":倍速} / {"op":"run"} / {"op":"pause"} / {"op":"reset"} / {"op":"fast_forward","minutes":分钟}
+任意动作可加 "at":X 表示 X 分钟后执行（模拟时间）。
+
+规则：
+- 工位 id：上料/人工段工位用其 id；通道工位用 "ch{通道号}.{工位序号从1起}"，如 1通道第1个工位(加热固化)= "ch1.1"；整通道 "ch1"；其余见「可用工位 id」。
+- 新增通道工位时给出完整的新 chStages 数组（保留原工位及其时间，新工位时间未说明则沿用同类工位时间），例如“固化通道增加一个冷却工位，变成加热固化-冷却1-冷却2”→ patch chStages = [{"name":"加热固化","t":原值},{"name":"冷却1","t":原冷却值},{"name":"冷却2","t":原冷却值}]。
+- “冷却1 900s放行改为900~1000秒之间波动”→ set_time，path 为该工位路径，value={"type":"uniform","min":900,"max":1000}。
+- 上料段/人工段新增工位用 insert，元素格式 {"name":"打码","t":{"type":"fixed","v":30}}；人工段装箱工位带 "pack":true。
+- 结构变更会让模拟重建、重新爬坡，在 reply 中提醒。
+- 只是提问（瓶颈在哪、为什么堵、产出多少）时 actions 为空，依据实时状态按“现象→原因→建议”简洁作答，不编造状态里没有的数据。
+- 指令有歧义或找不到对应工位/参数时不要猜，actions 为空并在 reply 里问清楚。`;
+
+const AI = Object.assign({ prov: "openai", key: "", base: "", model: "" }, store.get("lsx-sim-ai2") || {});
+const chatHist = [];
+const AI_DEF = { openai: { base: "https://api.xiaomimimo.com/v1", model: "mimo-v2-flash" }, claude: { base: "", model: "claude-opus-5-5" } };
 
 function stateBrief() {
   const th = theory(CFG), r = rollTakt(30), avg = avgTakt();
-  const stations = stationRows().map(x => `${x.id}(${x.name}) 状态:${x.state} 作业${pct(x.u.work)} 堵料${pct(x.u.block)} 待料${pct(x.u.idle)} 停机${pct(x.u.down)}`);
+  const rows = stationRows().map(x => `${x.id}(${x.name}) 当前:${x.state} 作业${pct(x.u.work)} 堵料${pct(x.u.block)} 待料${pct(x.u.idle)} 停机${pct(x.u.down)}`);
   const down = Object.entries(S.down).map(([k, d]) => `${k}(${targetName(k)}) ${d.reason} 剩余${d.until === Infinity ? "直到恢复" : fmtDur(d.until - S.t)}`);
+  const cfgView = clone(CFG); delete cfgView.channels; cfgView.channels_summary = CFG.channels.map((x, i) => `${i + 1}#${x.on ? "开" : "关"} 进${x.tin}s/出${x.tout}s`).join("；");
   return [
     `模拟时间：${clockText()}（已运行 ${fmtDur(S.t)}）；运行中：${S.running ? "是" : "否"}；倍速 ${SPEED}×`,
-    `产出 ${S.out} 件；近30件实时节拍 ${r ? r.toFixed(1) : "—"} s/件；平均节拍 ${avg ? avg.toFixed(1) : "—"} s/件；理论线体节拍 ${th.LT.toFixed(1)} s/件（${th.src}）；目标节拍 ${th.target ? th.target.toFixed(1) : "未设"}`,
-    `在制：工装 ${CFG.tools} 套（回流缓存 ${S.retBuf.length}，进料等待 ${S.feedQ.length}，进料途中 ${S.feed.length}，出料途中 ${S.out_.length}，脱模前排队 ${S.demQ.length}）；冷却通道 ${S.cool.groups.reduce((s, g) => s + g.length, 0)}/${CFG.cool.rows * CFG.cool.cols} 件；最近冷却时间 ${S.coolTimes.length ? S.coolTimes[S.coolTimes.length - 1].toFixed(0) + "s" : "—"}（要求 ${CFG.cool.req}s）`,
-    `通道派发策略：${CFG.dispatch}；工时波动 ${CFG.vari}`,
+    `产出 ${S.out} 件；近30件节拍 ${r ? r.toFixed(1) : "—"} s/件；平均 ${avg ? avg.toFixed(1) : "—"} s/件；理论线体节拍 ${th.LT.toFixed(1)} s/件（${th.src}）；目标节拍 ${th.target ? th.target.toFixed(1) : "未设"}`,
+    `在制：工装 ${CFG.tools} 套（待上料 ${S.retBuf.length}，进料等待 ${S.feedQ.length}，进料途中 ${S.feed.length}，出料途中 ${S.out_.length}，脱模前排队 ${S.demQ.length}）；冷却通道 ${S.cool.groups.reduce((s, g) => s + g.length, 0)} 件；最近冷却时间 ${S.coolTimes.length ? S.coolTimes[S.coolTimes.length - 1].toFixed(0) + "s" : "—"}（要求 ${CFG.cool.req}s）`,
     `当前停机：${down.length ? down.join("；") : "无"}`,
     `计划中的干预：${S.scheduled.length ? S.scheduled.map(j => fmtDur(j.at - S.t) + "后 " + describe(j.act)).join("；") : "无"}`,
-    `工位状态：\n` + stations.join("\n"),
+    `工位状态：\n` + rows.join("\n"),
     `可用工位 id：${allTargets().join(", ")}`,
-    `可调参数（key = 当前值）：\n` + paramList().map(p => `${p.key} = ${p.value} ${p.unit}  // ${p.label}`).join("\n")
+    `放行时间清单（path = 当前值）：\n` + timedList().map(x => `${x.path} = ${JSON.stringify(x.t)}  // ${x.grp}·${x.name}`).join("\n"),
+    `数值参数清单（key = 当前值）：\n` + paramList().map(p => `${p.key} = ${p.value}  // ${p.label}${p.unit ? " [" + p.unit + "]" : ""}`).join("\n"),
+    `当前完整配置 JSON：\n` + JSON.stringify(cfgView)
   ].join("\n");
 }
-
-async function askAI(text) {
-  const Anthropic = await loadSDK();
-  const client = new Anthropic({ apiKey: AI.key, baseURL: AI.base || undefined, dangerouslyAllowBrowser: true });
-  const messages = chatHist.slice(-16).concat([{ role: "user", content: `【实时线体状态】\n${stateBrief()}\n\n【技术员指令】\n${text}` }]);
-  const resp = await client.beta.messages.create({
-    model: AI.model || "claude-opus-5-5",
-    max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    output_config: { effort: "medium" },
-    system: AI_SYSTEM,
-    tools: [AI_TOOL],
-    messages
-  });
-  if (resp.stop_reason === "refusal") return { reply: "模型拒绝了这条请求" + (resp.stop_details && resp.stop_details.explanation ? "：" + resp.stop_details.explanation : "") + "。", actions: [] };
-  let out = null, txt = "";
-  for (const b of resp.content) {
-    if (b.type === "tool_use" && b.name === "apply_actions") out = b.input;
-    else if (b.type === "text") txt += b.text;
-  }
-  if (!out) out = { reply: txt || "（无答复）", actions: [] };
-  if (!Array.isArray(out.actions)) out.actions = [];
-  return out;
+function parseJSONReply(txt) {
+  let s = String(txt || "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const f = /```(?:json)?\s*([\s\S]*?)```/.exec(s); if (f) s = f[1];
+  const a = s.indexOf("{"), b = s.lastIndexOf("}");
+  if (a < 0 || b <= a) return { reply: s || "（无答复）", actions: [] };
+  try { const o = JSON.parse(s.slice(a, b + 1)); return { reply: String(o.reply || ""), actions: Array.isArray(o.actions) ? o.actions : [] }; }
+  catch (e) { return { reply: "模型返回的 JSON 无法解析：" + e.message, actions: [] }; }
 }
-
+async function callOpenAI(messages) {
+  const base = (AI.base || AI_DEF.openai.base).replace(/\/+$/, "");
+  const body = { model: AI.model || AI_DEF.openai.model, messages: [{ role: "system", content: AI_SYSTEM }].concat(messages), temperature: 0.3, max_tokens: 8192, response_format: { type: "json_object" } };
+  const post = b => fetch(base + "/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + AI.key }, body: JSON.stringify(b) });
+  let r = await post(body);
+  if (r.status === 400 || r.status === 422) { delete body.response_format; r = await post(body); }  // 接口不支持 JSON 模式时退回纯提示词约束
+  if (!r.ok) throw new Error("HTTP " + r.status + " " + (await r.text()).slice(0, 300));
+  const j = await r.json();
+  const msg = j.choices && j.choices[0] && j.choices[0].message;
+  if (!msg) throw new Error("返回格式异常：" + JSON.stringify(j).slice(0, 200));
+  return msg.content || "";
+}
+let sdkPromise = null;
+async function callClaude(messages) {
+  if (!sdkPromise) sdkPromise = import("https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.135.0/+esm").then(m => m.default || m.Anthropic);
+  const Anthropic = await sdkPromise;
+  const client = new Anthropic({ apiKey: AI.key, baseURL: AI.base || undefined, dangerouslyAllowBrowser: true });
+  const resp = await client.beta.messages.create({
+    model: AI.model || AI_DEF.claude.model, max_tokens: 16000,
+    betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
+    output_config: { effort: "medium" }, system: AI_SYSTEM, messages
+  });
+  if (resp.stop_reason === "refusal") return JSON.stringify({ reply: "模型拒绝了这条请求。", actions: [] });
+  return resp.content.filter(b => b.type === "text").map(b => b.text).join("");
+}
+async function askAI(text) {
+  const messages = chatHist.slice(-12).concat([{ role: "user", content: `【实时线体状态】\n${stateBrief()}\n\n【技术员指令】\n${text}` }]);
+  const raw = AI.prov === "claude" ? await callClaude(messages) : await callOpenAI(messages);
+  return parseJSONReply(raw);
+}
 async function send(text) {
   text = text.trim(); if (!text) return;
   addMsg("u", text);
-  const useAI = !!AI.key;
   let res;
-  if (useAI) {
-    const pending = addMsg("sys", "Claude 思考中…");
-    try { res = await askAI(text); res.src = "Claude"; }
-    catch (e) {
-      const acts = localParse(text);
-      res = { reply: `AI 接口调用失败（${e && e.message ? e.message : e}），已改用本地规则解析。`, actions: acts, src: "本地解析" };
-    }
+  if (AI.key) {
+    const pending = addMsg("sys", "模型思考中…");
+    try { res = await askAI(text); res.src = AI.prov === "claude" ? "Claude" : (AI.model || AI_DEF.openai.model); }
+    catch (e) { res = { reply: `AI 接口调用失败（${e && e.message ? e.message : e}），已改用本地规则解析。`, actions: localParse(text), src: "本地解析" }; }
     pending.remove();
   } else {
     const acts = localParse(text);
-    res = { reply: acts.length ? "已按本地规则解析执行。" : "本地规则未识别这条指令。可换个说法（例：「3通道冷却位故障停机20分钟」「上料节拍改为70」「5分钟后预压保养10分钟」），或在上方填入 API Key 由 Claude 理解。", actions: acts, src: "本地解析" };
+    res = { reply: acts.length ? "已按本地规则解析执行。" : "本地规则未识别这条指令。可换个说法，或在上方填入 API Key 交给大模型理解。", actions: acts, src: "本地解析" };
   }
   const done = res.actions.map(a => (applyAction(a, res.src) ? "✓ " : "✗ ") + (a.at ? a.at + "分钟后 " : "") + describe(a));
   addMsg("a", res.reply, done, res.src);
-  chatHist.push({ role: "user", content: text }, { role: "assistant", content: res.reply + (done.length ? "\n已执行：" + done.join("；") : "") });
+  chatHist.push({ role: "user", content: text }, { role: "assistant", content: JSON.stringify({ reply: res.reply, executed: done }) });
   renderAll();
 }
 
 /* ================= 布局与绘制 ================= */
 const W = 1320, H = 830;
-const L = {
-  load: { x: 40, y: 680, w: 96, h: 52 }, pre: { x: 40, y: 584, w: 96, h: 52 },
-  feedX: 175, chY: i => 538 - i * 47, heatX: 200, heatW: 150, coolX: 368, coolW: 150, outX: 560,
-  demold: { x: 600, y: 680, w: 96, h: 52 }, retY: 790,
-  cooler: { x: 740, y: 640, cell: 23 }, loader: { x: 1150, y: 650, w: 100, h: 48 },
-  inspX: 1200, inspY: j => 570 - j * 64, inspW: 110, inspH: 46,
-  unload: { x: 1145, y: 70, w: 110, h: 46 }, visual: { x: 1005, y: 70, w: 110, h: 46 }, pack: { x: 865, y: 70, w: 110, h: 46 }, fg: { x: 735, y: 70, w: 100, h: 46 }
-};
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
 let scale = 1, offX = 0, offY = 0, HIT = [];
 function resize() {
@@ -684,23 +843,42 @@ function resize() {
   ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * offX, dpr * offY);
 }
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const COL = { work: "#2e9d5b", block: "#e0a92e", idle: "#b8c0cc", down: "#c0392b", load: "#e58a2b", empty: "#8a94a6", heat: "rgba(217,71,58,.13)", cool: "rgba(58,123,213,.12)" };
+const COL = { work: "#2e9d5b", block: "#e0a92e", idle: "#b8c0cc", down: "#c0392b", load: "#e58a2b", empty: "#8a94a6", heat: "rgba(217,71,58,.13)", cool: "rgba(58,123,213,.12)", other: "rgba(120,120,140,.10)" };
+// 镜像：所有坐标经 X() 转换，文字不翻转
+const MX = () => CFG.layout.mirror;
+const X = x => MX() ? W - x : x;
+const RX = r => MX() ? { x: W - r.x - r.w, y: r.y, w: r.w, h: r.h } : r;
+const PX = pts => pts.map(p => [X(p[0]), p[1]]);
 
-function srvState(s, extraDown) {
-  if (isDown(s.id) || extraDown) return "down";
-  if (s.ent && !s.done) return "work";
-  if (s.ent && s.done) return "block";
-  return "idle";
+function geo() {
+  const c = CFG, n = c.channels.length, K = c.chStages.length;
+  const rowH = Math.min(47, 470 / Math.max(1, n));
+  const g = {
+    pre: c.pre.map((s, j) => ({ x: 40, y: 690 - j * 92, w: 100, h: 50 })),
+    feedX: 178, outX: 575, rowH,
+    chY: i => 545 - (c.layout.ch1 === "far" ? n - 1 - i : i) * rowH,
+    stageX: k => 205 + k * ((575 - 225) / K), stageW: (575 - 225) / K - 10,
+    demold: { x: 610, y: 690, w: 100, h: 50 }, retY: 795,
+    cooler: { x: 750, y: 640, cell: 23 }, loader: { x: 1150, y: 655, w: 110, h: 46 },
+    inspX: 1195, inspY: j => 572 - j * 64, inspW: 110, inspH: 46,
+    post: c.post.map((s, j) => ({ x: 1150 - j * 140, y: 68, w: 112, h: 46 }))
+  };
+  g.fg = { x: 1150 - c.post.length * 140, y: 68, w: 100, h: 46 };
+  g.feedTop = Math.min(...c.channels.map((_, i) => g.chY(i)));
+  return g;
 }
-function box(r, label, state, sub, fill) {
+function srvState(s, extraDown) { if (isDown(s.id) || extraDown) return "down"; if (s.ent && !s.done) return "work"; if (s.ent && s.done) return "block"; return "idle"; }
+function box(r0, label, state, sub, fill) {
+  const r = RX(r0);
   ctx.fillStyle = fill || css("--card"); ctx.strokeStyle = COL[state] || css("--line"); ctx.lineWidth = state === "down" ? 3 : 2;
   roundRect(r.x, r.y, r.w, r.h, 6); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = css("--ink"); ctx.font = "600 12.5px sans-serif"; ctx.textAlign = "center";
-  ctx.fillText(label, r.x + r.w / 2, r.y + 17);
-  if (sub) { ctx.font = "11.5px sans-serif"; ctx.fillStyle = css("--ink2"); ctx.fillText(sub, r.x + r.w / 2, r.y + r.h - 8); }
+  ctx.fillStyle = css("--ink"); ctx.font = "600 12px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText(label, r.x + r.w / 2, r.y + 16, r.w - 6);
+  if (sub) { ctx.font = "11px sans-serif"; ctx.fillStyle = css("--ink2"); ctx.fillText(sub, r.x + r.w / 2, r.y + r.h - 7, r.w - 6); }
+  return r;
 }
 function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-function line(pts, w, col, dash) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1])); ctx.lineWidth = w; ctx.strokeStyle = col; ctx.setLineDash(dash || []); ctx.stroke(); ctx.setLineDash([]); }
+function line(pts, w, col, dash) { pts = PX(pts); ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); pts.slice(1).forEach(p => ctx.lineTo(p[0], p[1])); ctx.lineWidth = w; ctx.strokeStyle = col; ctx.setLineDash(dash || []); ctx.stroke(); ctx.setLineDash([]); }
 function along(pts, f) {
   const seg = []; let tot = 0;
   for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); seg.push(d); tot += d; }
@@ -708,142 +886,134 @@ function along(pts, f) {
   for (let i = 0; i < seg.length; i++) { if (d <= seg[i]) { const t = seg[i] ? d / seg[i] : 0; return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t]; } d -= seg[i]; }
   return pts[pts.length - 1];
 }
-function carrier(x, y, n) {
-  ctx.lineWidth = 1.5;
+function carrier(x0, y, n) {
+  const x = X(x0); ctx.lineWidth = 1.5;
   if (n > 0) { ctx.fillStyle = COL.load; ctx.strokeStyle = "#a85a12"; ctx.fillRect(x - 7, y - 7, 14, 14); ctx.strokeRect(x - 7, y - 7, 14, 14); if (CFG.N > 1) { ctx.fillStyle = "#fff"; ctx.font = "bold 9px sans-serif"; ctx.textAlign = "center"; ctx.fillText(n, x, y + 3); } }
   else { ctx.strokeStyle = COL.empty; ctx.strokeRect(x - 7, y - 7, 14, 14); }
 }
-function partDot(x, y, p) {
-  const f = Math.min(1, (S.t - p.tIn) / Math.max(1, CFG.cool.req));
-  ctx.fillStyle = `rgb(${Math.round(217 - 159 * f)},${Math.round(71 + 52 * f)},${Math.round(58 + 155 * f)})`;
+function partDot(x0, y, p) {
+  const f = Math.min(1, (S.t - p.tIn) / Math.max(1, CFG.cool.req)), x = X(x0);
+  ctx.fillStyle = p.tIn === undefined ? "#d9473a" : `rgb(${Math.round(217 - 159 * f)},${Math.round(71 + 52 * f)},${Math.round(58 + 155 * f)})`;
   ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill();
+}
+function text(s, x0, y, opt = {}) {
+  ctx.font = opt.font || "12px sans-serif"; ctx.fillStyle = opt.color || css("--ink2");
+  const al = opt.align || "left"; ctx.textAlign = MX() ? (al === "left" ? "right" : al === "right" ? "left" : "center") : al;
+  ctx.fillText(s, X(x0), y);
 }
 function downTag(r, id) {
   const d = S.down[id]; if (!d || d.until <= S.t) return;
-  ctx.fillStyle = "rgba(192,57,43,.88)"; ctx.font = "bold 11px sans-serif";
-  const t = d.reason + " " + (d.until === Infinity ? "待恢复" : fmtClock(d.until - S.t));
-  const w = ctx.measureText(t).width + 10;
-  roundRect(r.x + r.w / 2 - w / 2, r.y - 18, w, 16, 4); ctx.fill();
-  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.fillText(t, r.x + r.w / 2, r.y - 6);
+  ctx.fillStyle = "rgba(192,57,43,.9)"; ctx.font = "bold 11px sans-serif";
+  const t = d.reason + " " + (d.until === Infinity ? "待恢复" : fmtClock(d.until - S.t)), w = ctx.measureText(t).width + 10;
+  roundRect(r.x + r.w / 2 - w / 2, r.y - 17, w, 16, 4); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.fillText(t, r.x + r.w / 2, r.y - 5);
 }
+const hit = (id, r) => HIT.push({ id, r });
+const stageFill = nm => /加热|固化/.test(nm) ? COL.heat : /冷却/.test(nm) ? COL.cool : COL.other;
 
 function draw() {
   if (!S) return;
-  const c = CFG, ink2 = css("--ink2"), conv = css("--line");
+  const c = CFG, g = geo(), ink = css("--ink"), conv = css("--line"), K = c.chStages.length;
   ctx.clearRect(-offX / scale, -offY / scale, W + 2 * offX / scale, H + 2 * offY / scale);
   HIT = [];
-  const hit = (id, r) => HIT.push({ id, r });
-  const nCh = c.channels.length;
+  const lastPre = g.pre[g.pre.length - 1], first = g.pre[0];
+
   // 输送线
-  const feedTop = L.chY(nCh - 1);
-  line([[L.pre.x + L.pre.w, L.pre.y + 26], [L.feedX, L.pre.y + 26], [L.feedX, feedTop]], 8, conv);
-  line([[L.outX, feedTop], [L.outX, L.demold.y + 26], [L.demold.x, L.demold.y + 26]], 8, conv);
-  line([[L.demold.x + 48, L.demold.y + L.demold.h], [L.demold.x + 48, L.retY], [L.load.x + 48, L.retY], [L.load.x + 48, L.load.y + L.load.h]], 6, conv, [10, 6]);
-  line([[L.load.x + 48, L.load.y], [L.load.x + 48, L.pre.y + L.pre.h]], 6, conv);
-  ctx.font = "12px sans-serif"; ctx.fillStyle = ink2; ctx.textAlign = "left";
-  ctx.fillText("进料主通道", L.feedX - 70, feedTop - 10); ctx.fillText("出料主通道", L.outX - 30, feedTop - 10);
-  ctx.fillText("空工装回流线 " + c.ret + "s" + (isDown("ret") ? "（停）" : ""), 260, L.retY - 8);
-  hit("feed", { x: L.feedX - 10, y: feedTop, w: 20, h: L.pre.y + 26 - feedTop });
-  hit("out", { x: L.outX - 10, y: feedTop, w: 20, h: L.demold.y - feedTop });
-  hit("ret", { x: L.load.x + 40, y: L.retY - 10, w: L.demold.x - L.load.x, h: 20 });
-  if (isDown("feed")) downTag({ x: L.feedX - 50, y: feedTop + 30, w: 100, h: 1 }, "feed");
-  if (isDown("out")) downTag({ x: L.outX - 50, y: feedTop + 30, w: 100, h: 1 }, "out");
-  if (isDown("ret")) downTag({ x: 300, y: L.retY - 4, w: 100, h: 1 }, "ret");
+  line([[lastPre.x + lastPre.w, lastPre.y + 25], [g.feedX, lastPre.y + 25], [g.feedX, g.feedTop]], 8, conv);
+  line([[g.outX, g.feedTop], [g.outX, g.demold.y + 25], [g.demold.x, g.demold.y + 25]], 8, conv);
+  line([[g.demold.x + 50, g.demold.y + g.demold.h], [g.demold.x + 50, g.retY], [first.x + 50, g.retY], [first.x + 50, first.y + first.h]], 6, conv, [10, 6]);
+  for (let j = 0; j < g.pre.length - 1; j++) line([[g.pre[j].x + 50, g.pre[j].y], [g.pre[j].x + 50, g.pre[j + 1].y + g.pre[j + 1].h]], 6, conv);
+  text("进料主通道", g.feedX - 60, g.feedTop - 10); text("出料主通道", g.outX - 30, g.feedTop - 10);
+  text("空工装回流线 " + c.ret + "s" + (isDown("ret") ? "（停）" : ""), 270, g.retY - 8);
+  hit("feed", RX({ x: g.feedX - 10, y: g.feedTop, w: 20, h: lastPre.y + 25 - g.feedTop }));
+  hit("out", RX({ x: g.outX - 10, y: g.feedTop, w: 20, h: g.demold.y - g.feedTop }));
+  hit("ret", RX({ x: first.x + 45, y: g.retY - 10, w: g.demold.x - first.x, h: 20 }));
+  downTag(RX({ x: g.feedX - 50, y: g.feedTop + 30, w: 100, h: 1 }), "feed");
+  downTag(RX({ x: g.outX - 50, y: g.feedTop + 30, w: 100, h: 1 }), "out");
+  downTag(RX({ x: 300, y: g.retY - 4, w: 100, h: 1 }), "ret");
 
   // 通道
   S.ch.forEach((ch, i) => {
-    const y = L.chY(i), on = c.channels[i].on, chD = isDown(`ch${i + 1}`);
+    const y = g.chY(i), on = c.channels[i].on, chD = isDown(`ch${i + 1}`), bh = Math.min(36, g.rowH - 8);
     ctx.globalAlpha = on ? 1 : 0.35;
-    line([[L.feedX, y + 18], [L.outX, y + 18]], 3, conv);
-    const rh = { x: L.heatX, y, w: L.heatW, h: 36 }, rc = { x: L.coolX, y, w: L.coolW, h: 36 };
-    box(rh, `${i + 1}# 加热位`, srvState(ch.heat, chD), "", COL.heat);
-    if (c.mode === 2) box(rc, `${i + 1}# 冷却位`, srvState(ch.cool, chD), "", COL.cool);
-    if (ch.entry) carrier(L.heatX - 12, y + 18, ch.entry.n);
-    [[ch.heat, rh], [ch.cool, rc]].forEach(([s, r]) => {
-      if (s.ent) { carrier(r.x + r.w - 18, y + 22, s.ent.n); ctx.font = "11px sans-serif"; ctx.fillStyle = ink2; ctx.textAlign = "left"; ctx.fillText(fmtClock(Math.max(0, s.rem)), r.x + 6, y + 31); }
+    line([[g.feedX, y + bh / 2], [g.outX, y + bh / 2]], 3, conv);
+    ch.pos.forEach((p, k) => {
+      const r0 = { x: g.stageX(k), y, w: g.stageW, h: bh }, sid = chId(i, k);
+      const st = (chD || isDown(sid)) ? "down" : p && p.rem > 0 ? "work" : p ? "block" : "idle";
+      const r = box(r0, `${i + 1}# ${c.chStages[k].name}`, st, "", stageFill(c.chStages[k].name));
+      if (p) { carrier(r0.x + r0.w - 14, y + bh - 12, p.c.n); text(fmtClock(Math.max(0, p.rem)), r0.x + 5, y + bh - 5, { font: "10.5px sans-serif" }); }
+      hit(sid, r); downTag(r, sid);
     });
+    if (ch.entry) carrier(g.stageX(0) - 13, y + bh / 2, ch.entry.n);
     ctx.globalAlpha = 1;
-    hit(`ch${i + 1}.heat`, rh); if (c.mode === 2) hit(`ch${i + 1}.cool`, rc);
-    downTag(rh, `ch${i + 1}.heat`); downTag(rc, `ch${i + 1}.cool`); if (chD) downTag({ x: L.heatX, y, w: L.coolX + L.coolW - L.heatX, h: 1 }, `ch${i + 1}`);
-    if (!on) { ctx.fillStyle = ink2; ctx.font = "11px sans-serif"; ctx.textAlign = "left"; ctx.fillText("未开", L.coolX + L.coolW + 6, y + 22); }
+    if (chD) downTag(RX({ x: g.stageX(0), y, w: g.outX - g.stageX(0), h: 1 }), `ch${i + 1}`);
+    if (!on) text("未开", g.outX + 8, y + bh / 2 + 4, { font: "11px sans-serif" });
   });
+  text(`通道内：${c.chStages.map(s => s.name + " " + tText(s.t)).join(" → ")} · ${c.chIndex === "sync" ? "同步指进" : "各位独立放行"}`, g.feedX - 20, g.feedTop - 28, { font: "11.5px sans-serif" });
 
-  // 工位
-  const stBox = (id, r, label, sub) => { box(r, label, srvState(S.srv[id]), sub); hit(id, r); downTag(r, id); };
-  stBox("load", L.load, "上料工位", c.load + "s/工装");
-  stBox("pre", L.pre, "预压工位", c.pre + "s/工装");
-  stBox("demold", L.demold, "脱模工位", c.demold + "s/工装");
-  if (S.srv.load.ent) carrier(L.load.x + L.load.w - 14, L.load.y + 34, S.srv.load.ent.n);
-  if (S.srv.pre.ent) carrier(L.pre.x + L.pre.w - 14, L.pre.y + 34, S.srv.pre.ent.n);
-  if (S.srv.demold.ent) carrier(L.demold.x + L.demold.w - 14, L.demold.y + 34, S.srv.demold.ent.n);
-  // 回流缓存（上料工位下方回流线末端排队）
-  S.retBuf.forEach((cr, j) => carrier(L.load.x + 48 + 20 + (j % 12) * 16, L.retY + 14 + Math.floor(j / 12) * 0, 0));
-  if (S.retBuf.length) { ctx.font = "11px sans-serif"; ctx.fillStyle = ink2; ctx.textAlign = "left"; ctx.fillText(`空工装待上料 ${S.retBuf.length}`, L.load.x + 60, L.retY + 34); }
-  S.ret.forEach(cr => { const [x, y] = along([[L.demold.x + 48, L.demold.y + L.demold.h], [L.demold.x + 48, L.retY], [L.load.x + 48, L.retY]], 1 - cr.rem / cr.dur); carrier(x, y, 0); });
-  S.feedQ.forEach((cr, j) => carrier(L.feedX, L.pre.y + 26 - 18 - j * 17, cr.n));
-  S.feed.forEach(cr => { const y = L.chY(cr.ch) + 18; const [x, yy] = along([[L.feedX, L.pre.y - 30], [L.feedX, y], [L.heatX, y]], 1 - cr.rem / cr.dur); carrier(x, yy, cr.n); });
-  S.out_.forEach(cr => { const y = L.chY(cr.ch) + 18; const [x, yy] = along([[L.coolX + L.coolW, y], [L.outX, y], [L.outX, L.demold.y]], 1 - cr.rem / cr.dur); carrier(x, yy, cr.n); });
-  S.demQ.forEach((cr, j) => carrier(L.outX, L.demold.y - 10 - j * 17, cr.n));
+  // 上料段 / 脱模
+  c.pre.forEach((s, j) => { const r = box(g.pre[j], s.name, srvState(S.pre[j]), tText(s.t) + "/工装"); hit(s.id, r); downTag(r, s.id); if (S.pre[j].ent) carrier(g.pre[j].x + g.pre[j].w - 14, g.pre[j].y + 33, S.pre[j].ent.n); });
+  { const r = box(g.demold, c.demold.name, srvState(S.demold), tText(c.demold.t) + "/工装"); hit("demold", r); downTag(r, "demold"); if (S.demold.ent) carrier(g.demold.x + g.demold.w - 14, g.demold.y + 33, S.demold.ent.n); }
+  S.retBuf.forEach((cr, j) => carrier(first.x + 70 + (j % 14) * 16, g.retY + 14, 0));
+  if (S.retBuf.length) text(`空工装待上料 ${S.retBuf.length}`, first.x + 62, g.retY + 34, { font: "11px sans-serif" });
+  const retPath = [[g.demold.x + 50, g.demold.y + g.demold.h], [g.demold.x + 50, g.retY], [first.x + 50, g.retY]];
+  S.ret.forEach(cr => { const [x, y] = along(retPath, 1 - cr.rem / cr.dur); carrier(x, y, 0); });
+  S.feedQ.forEach((cr, j) => carrier(g.feedX, lastPre.y + 25 - 18 - j * 17, cr.n));
+  S.feed.forEach(cr => { const y = g.chY(cr.ch) + Math.min(36, g.rowH - 8) / 2; const [x, yy] = along([[g.feedX, lastPre.y - 30], [g.feedX, y], [g.stageX(0) - 13, y]], 1 - cr.rem / cr.dur); carrier(x, yy, cr.n); });
+  S.out_.forEach(cr => { const y = g.chY(cr.ch) + Math.min(36, g.rowH - 8) / 2; const [x, yy] = along([[g.stageX(K - 1) + g.stageW, y], [g.outX, y], [g.outX, g.demold.y]], 1 - cr.rem / cr.dur); carrier(x, yy, cr.n); });
+  S.demQ.forEach((cr, j) => carrier(g.outX, g.demold.y - 10 - j * 17, cr.n));
 
   // 冷却通道
-  const cl = S.cool, cc = L.cooler, cols = c.cool.cols, rows = c.cool.rows, cw = cc.cell;
-  const crect = { x: cc.x - 4, y: cc.y - 4, w: cols * cw + 8, h: rows * cw + 8 };
-  const cst = isDown("cooler") ? "down" : cl.idxRem > 0 ? "work" : cl.groups[0].length >= c.cool.grp ? "block" : "idle";
-  ctx.fillStyle = COL.cool; ctx.strokeStyle = COL[cst]; ctx.lineWidth = 2; roundRect(crect.x, crect.y, crect.w, crect.h, 5); ctx.fill(); ctx.stroke();
-  for (let a = 0; a < cols; a++) for (let b = 0; b < rows; b++) { ctx.strokeStyle = conv; ctx.lineWidth = 1; ctx.strokeRect(cc.x + a * cw, cc.y + b * cw, cw, cw); }
-  const shift = cl.idxRem > 0 ? (1 - cl.idxRem / Math.max(DT, c.cool.fwd)) * (c.cool.grp / rows) * cw : 0;
-  cl.groups.forEach((g, gi) => g.forEach((p, j) => {
-    const idx = gi * c.cool.grp + j, col = Math.floor(idx / rows), row = idx % rows;
-    if (col < cols) partDot(cc.x + col * cw + cw / 2 + shift, cc.y + row * cw + cw / 2, p);
-  }));
-  ctx.font = "600 12.5px sans-serif"; ctx.fillStyle = css("--ink"); ctx.textAlign = "left";
-  ctx.fillText(`冷却通道 ${rows}×${cols}（每组 ${c.cool.grp} 件）→`, cc.x, cc.y - 12);
-  ctx.font = "11.5px sans-serif"; ctx.fillStyle = ink2;
-  const lastCool = S.coolTimes.length ? S.coolTimes[S.coolTimes.length - 1] : 0;
-  ctx.fillText(`在冷 ${cl.groups.reduce((s, g) => s + g.length, 0)} 件 · 最近冷却 ${lastCool ? fmtClock(lastCool) : "—"}（要求 ${fmtClock(c.cool.req)}）`, cc.x, cc.y + rows * cw + 20);
-  if (lastCool && lastCool < c.cool.req) { ctx.fillStyle = COL.down; ctx.fillText("⚠ 冷却时间不足", cc.x + 300, cc.y + rows * cw + 20); }
-  hit("cooler", crect); downTag(crect, "cooler");
-  line([[L.demold.x + L.demold.w, L.demold.y + 20], [cc.x - 4, L.demold.y + 20]], 3, conv);
+  const cl = S.cool, cc = g.cooler, cw = cc.cell;
+  if (c.cool.on) {
+    const cols = c.cool.cols, rows = c.cool.rows;
+    const cr0 = { x: cc.x - 4, y: cc.y - 4, w: cols * cw + 8, h: rows * cw + 8 }, crect = RX(cr0);
+    const cst = isDown("cooler") ? "down" : cl.idxRem > 0 ? "work" : cl.groups[0].length >= c.cool.grp ? "block" : "idle";
+    ctx.fillStyle = COL.cool; ctx.strokeStyle = COL[cst]; ctx.lineWidth = 2; roundRect(crect.x, crect.y, crect.w, crect.h, 5); ctx.fill(); ctx.stroke();
+    for (let a = 0; a < cols; a++) for (let b = 0; b < rows; b++) { const q = RX({ x: cc.x + a * cw, y: cc.y + b * cw, w: cw, h: cw }); ctx.strokeStyle = conv; ctx.lineWidth = 1; ctx.strokeRect(q.x, q.y, q.w, q.h); }
+    const shift = cl.idxRem > 0 ? (1 - cl.idxRem / Math.max(DT, c.cool.fwd)) * (c.cool.grp / rows) * cw : 0;
+    cl.groups.forEach((gp, gi) => gp.forEach((p, j) => { const idx = gi * c.cool.grp + j, col = Math.floor(idx / rows), row = idx % rows; if (col < cols) partDot(cc.x + col * cw + cw / 2 + shift, cc.y + row * cw + cw / 2, p); }));
+    text(`冷却通道 ${rows}×${cols}（每组 ${c.cool.grp} 件）→`, cc.x, cc.y - 12, { font: "600 12.5px sans-serif", color: ink });
+    const lastCool = S.coolTimes.length ? S.coolTimes[S.coolTimes.length - 1] : 0;
+    text(`在冷 ${cl.groups.reduce((s, gg) => s + gg.length, 0)} 件 · 最近冷却 ${lastCool ? fmtClock(lastCool) : "—"}（要求 ${fmtClock(c.cool.req)}）${lastCool && lastCool < c.cool.req ? "  ⚠ 冷却不足" : ""}`, cc.x, cc.y + rows * cw + 20, { font: "11.5px sans-serif" });
+    hit("cooler", crect); downTag(crect, "cooler");
+  } else {
+    S.pickQ.forEach((p, j) => partDot(cc.x + 20 + j * 14, cc.y + 30, p));
+    text("（未设冷却通道，脱模后直接待检测上料）", cc.x, cc.y + 10, { font: "11.5px sans-serif" });
+  }
+  line([[g.demold.x + g.demold.w, g.demold.y + 20], [cc.x - 4, g.demold.y + 20]], 3, conv);
 
   // 检测线
-  stBox("loader", L.loader, "检测线上料机械手", c.cool.r2 + "s/件");
-  if (S.srv.loader.ent) partDot(L.loader.x + L.loader.w - 14, L.loader.y + 32, S.srv.loader.ent);
-  const ins = inspStations(), I = S.insp;
-  const inspTop = ins.length ? L.inspY(ins.length - 1) : L.inspY(0);
-  line([[L.inspX + L.inspW / 2 + 5, L.loader.y], [L.inspX + L.inspW / 2 + 5, inspTop]], 3, conv);
-  const nestR = { x: L.inspX + 20, y: L.inspY(0) + 50, w: 70, h: 24 };
-  ctx.strokeStyle = conv; ctx.strokeRect(nestR.x, nestR.y, nestR.w, nestR.h); ctx.font = "11px sans-serif"; ctx.fillStyle = ink2; ctx.textAlign = "center"; ctx.fillText("入口料位", nestR.x + 35, nestR.y + 16);
-  if (I.nest) partDot(nestR.x + 60, nestR.y + 12, I.nest);
+  { const r = box(g.loader, c.loader.name, srvState(S.loader), tText(c.loader.t) + "/件"); hit("loader", r); downTag(r, "loader"); if (S.loader.ent) partDot(g.loader.x + g.loader.w - 14, g.loader.y + 30, S.loader.ent); }
+  const ins = inspStations(), I = S.insp, inspTop = ins.length ? g.inspY(ins.length - 1) : g.inspY(0);
+  line([[g.inspX + g.inspW / 2 + 5, g.loader.y], [g.inspX + g.inspW / 2 + 5, inspTop]], 3, conv);
+  const nest = RX({ x: g.inspX + 20, y: g.inspY(0) + 50, w: 70, h: 22 });
+  ctx.strokeStyle = conv; ctx.lineWidth = 1; ctx.strokeRect(nest.x, nest.y, nest.w, nest.h); ctx.font = "10.5px sans-serif"; ctx.fillStyle = css("--ink2"); ctx.textAlign = "center"; ctx.fillText("入口料位", nest.x + 35, nest.y + 15);
+  if (I.nest) partDot(g.inspX + 80, g.inspY(0) + 61, I.nest);
   ins.forEach((s, j) => {
-    const r = { x: L.inspX, y: L.inspY(j), w: L.inspW, h: L.inspH }, p = I.pos[j];
-    const id = "insp" + (s.i + 1), st = isDown(id) || isDown("insp") ? "down" : I.phase === "move" ? "work" : p && p.rem > 0 ? "work" : p ? "block" : "idle";
-    box(r, (s.name || "检测" + (s.i + 1)), st, s.t + "s");
-    hit(id, r); downTag(r, id);
-    if (p) { const dy = I.phase === "move" ? -(1 - I.rem / Math.max(DT, c.insp.move)) * 64 : 0; partDot(r.x + r.w - 12, r.y + 24 + dy, p.part); }
+    const r0 = { x: g.inspX, y: g.inspY(j), w: g.inspW, h: g.inspH }, p = I.pos[j], id = "insp" + (s.i + 1);
+    const st = isDown(id) || isDown("insp") ? "down" : I.phase === "move" ? "work" : p && p.rem > 0 ? "work" : p ? "block" : "idle";
+    const r = box(r0, s.name || "检测" + (s.i + 1), st, tText(s.t)); hit(id, r); downTag(r, id);
+    if (p) { const dy = I.phase === "move" ? -(1 - I.rem / Math.max(DT, c.insp.move)) * 64 : 0; partDot(r0.x + r0.w - 12, r0.y + 24 + dy, p.part); }
   });
-  ctx.font = "11.5px sans-serif"; ctx.fillStyle = ink2; ctx.textAlign = "left";
-  ctx.fillText("同步检测线 · 移栽 " + c.insp.move + "s" + (isDown("insp") ? "（停）" : ""), L.inspX - 90, inspTop - 10 - 0);
-  hit("insp", { x: L.inspX - 95, y: inspTop - 24, w: 90, h: 18 });
-  downTag({ x: L.inspX - 95, y: inspTop - 12, w: 90, h: 1 }, "insp");
+  text("同步检测线 · 移栽 " + c.insp.move + "s", g.inspX - 100, inspTop - 8, { font: "11.5px sans-serif" });
+  hit("insp", RX({ x: g.inspX - 100, y: inspTop - 22, w: 95, h: 18 }));
+  downTag(RX({ x: g.inspX - 100, y: inspTop - 12, w: 95, h: 1 }), "insp");
 
   // 人工段
-  line([[L.unload.x + L.unload.w / 2, inspTop - 30], [L.unload.x + L.unload.w / 2, L.unload.y + L.unload.h]], 3, conv);
-  line([[L.fg.x + L.fg.w, L.unload.y + 23], [L.unload.x, L.unload.y + 23]], 3, conv);
-  stBox("unload", L.unload, "下料(人工)", c.unload + "s/件");
-  stBox("visual", L.visual, "目检", c.visual + "s/件");
-  stBox("pack", L.pack, "装箱", c.place + "s+周期动作");
-  [[S.unlQ, L.unload], [S.visQ, L.visual], [S.packQ, L.pack]].forEach(([q, r]) => q.forEach((p, j) => partDot(r.x + 10 + j * 13, r.y + r.h + 10, p)));
-  [["unload", L.unload], ["visual", L.visual], ["pack", L.pack]].forEach(([id, r]) => { if (S.srv[id].ent) partDot(r.x + r.w - 12, r.y + 30, S.srv[id].ent); });
-  box(L.fg, "成品", "idle", S.out + " 件", css("--soft"));
-  const perBox = c.perLayer * c.layers;
-  ctx.font = "11px sans-serif"; ctx.fillStyle = ink2; ctx.textAlign = "center";
-  ctx.fillText(`第 ${Math.floor(S.packCount / (perBox || 1)) + 1} 箱 · 第 ${Math.floor((S.packCount % (perBox || 1)) / (c.perLayer || 1)) + 1} 层`, L.pack.x + L.pack.w / 2, L.pack.y + L.pack.h + 26);
+  const p0 = g.post[0] || g.fg;
+  line([[p0.x + p0.w / 2, inspTop - 28], [p0.x + p0.w / 2, p0.y + p0.h]], 3, conv);
+  line([[g.fg.x + g.fg.w, p0.y + 23], [p0.x, p0.y + 23]], 3, conv);
+  c.post.forEach((s, j) => {
+    const r = box(g.post[j], s.name, srvState(S.post[j]), tText(s.t) + (s.pack ? "+周期动作" : "")); hit(s.id, r); downTag(r, s.id);
+    S.postQ[j].forEach((p, q) => partDot(g.post[j].x + 10 + q * 13, g.post[j].y + g.post[j].h + 10, p));
+    if (S.post[j].ent) partDot(g.post[j].x + g.post[j].w - 12, g.post[j].y + 30, S.post[j].ent);
+    if (s.pack) { const perBox = c.perLayer * c.layers; text(`第 ${Math.floor(S.packCount / (perBox || 1)) + 1} 箱 · 第 ${Math.floor((S.packCount % (perBox || 1)) / (c.perLayer || 1)) + 1} 层`, g.post[j].x + g.post[j].w / 2, g.post[j].y + g.post[j].h + 26, { align: "center", font: "11px sans-serif" }); }
+  });
+  box(g.fg, "成品", "idle", S.out + " 件", css("--soft"));
 
-  // 标题
-  ctx.font = "600 13px sans-serif"; ctx.fillStyle = css("--ink"); ctx.textAlign = "left";
-  ctx.fillText(`${c.name} · 平面布局（示意）`, 30, 30);
-  ctx.font = "12px sans-serif"; ctx.fillStyle = ink2;
-  ctx.fillText(`N=${c.N} 件/工装 · T_ch=${c.Tch}s · 通道 ${c.channels.filter(x => x.on).length}/${nCh} · 派发：${dispName(c.dispatch)}`, 30, 48);
+  text(`${c.name} · 平面布局（示意）· 流向 ${MX() ? "右→左" : "左→右"}`, 30, 26, { font: "600 13px sans-serif", color: ink });
+  text(`N=${c.N} 件/工装 · 通道 ${c.channels.filter(x => x.on).length}/${c.channels.length} · 派发：${dispName(c.dispatch)}`, 30, 44);
 }
 
 /* ================= 统计 / 看板 ================= */
@@ -851,138 +1021,186 @@ const pct = x => isFinite(x) ? Math.round(x * 100) + "%" : "—";
 function fmtClock(s) { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60; return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(ss).padStart(2, "0"); }
 function fmtDur(s) { s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}小时${m}分` : `${m}分${s % 60}秒`; }
 function clockText() {
-  const abs = 8 * 3600 + S.t, day = Math.floor((abs - 8 * 3600) / 86400) + 1, sec = Math.floor(abs % 86400);
+  const abs = 8 * 3600 + S.t, day = Math.floor(S.t / 86400) + 1, sec = Math.floor(abs % 86400);
   const hh = Math.floor(sec / 3600), mm = Math.floor(sec % 3600 / 60), ss = sec % 60;
-  const shift = hh >= 8 && hh < 20 ? "白班" : "夜班";
-  return `第${day}天 ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} ${shift}`;
+  return `第${day}天 ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} ${hh >= 8 && hh < 20 ? "白班" : "夜班"}`;
 }
 function rollTakt(n) { const o = S.outTimes; if (o.length < n + 1) return 0; return (o[o.length - 1] - o[o.length - 1 - n]) / n; }
 function avgTakt() { const o = S.outTimes; if (o.length < 6) return 0; const from = Math.min(5, o.length - 2); return (o[o.length - 1] - o[from]) / (o.length - 1 - from); }
 function utilOf(st) { const tot = st.work + st.block + st.idle + st.down || 1; return { work: st.work / tot, block: st.block / tot, idle: st.idle / tot, down: st.down / tot }; }
 function stationRows() {
-  const rows = [];
+  const rows = [], sName = { work: "作业", block: "堵料", idle: "待料", down: "停机" };
   const push = (id, name, st, state) => rows.push({ id, name, u: utilOf(st), state });
-  const sName = { work: "作业", block: "堵料", idle: "待料", down: "停机" };
-  ["load", "pre"].forEach(id => push(id, S.srv[id].name, S.srv[id].st, sName[srvState(S.srv[id])]));
-  S.ch.forEach((ch, i) => { if (!CFG.channels[i].on && !ch.heat.ent && !ch.cool.ent) return; const st = {}; ["work", "block", "idle", "down"].forEach(k => st[k] = ch.heat.st[k] + (CFG.mode === 2 ? ch.cool.st[k] : 0)); push(`ch${i + 1}`, `${i + 1}通道`, st, sName[srvState(ch.heat, isDown(`ch${i + 1}`))] + "/" + (CFG.mode === 2 ? sName[srvState(ch.cool, isDown(`ch${i + 1}`))] : "")); });
-  push("demold", "脱模工位", S.srv.demold.st, sName[srvState(S.srv.demold)]);
-  push("cooler", "冷却通道(前移)", S.cool.st, isDown("cooler") ? "停机" : S.cool.idxRem ? "前移" : "—");
-  push("loader", "检测上料机械手", S.srv.loader.st, sName[srvState(S.srv.loader)]);
+  CFG.pre.forEach((s, j) => push(s.id, s.name, S.pre[j].st, sName[srvState(S.pre[j])]));
+  S.ch.forEach((ch, i) => {
+    if (!CFG.channels[i].on && !ch.pos.some(Boolean)) return;
+    const st = ST0(); ch.posSt.forEach(x => Object.keys(st).forEach(k => st[k] += x[k]));
+    push(`ch${i + 1}`, `${i + 1}通道`, st, ch.pos.map((p, k) => isDown(chId(i, k)) || isDown(`ch${i + 1}`) ? "停" : p ? (p.rem > 0 ? "作" : "堵") : "空").join("/"));
+  });
+  push("demold", CFG.demold.name, S.demold.st, sName[srvState(S.demold)]);
+  if (CFG.cool.on) push("cooler", "冷却通道(前移)", S.cool.st, isDown("cooler") ? "停机" : S.cool.idxRem ? "前移" : "—");
+  push("loader", CFG.loader.name, S.loader.st, sName[srvState(S.loader)]);
   inspStations().forEach((s, j) => push("insp" + (s.i + 1), "检测·" + (s.name || s.i + 1), S.insp.posSt[j], isDown("insp" + (s.i + 1)) ? "停机" : S.insp.pos[j] ? (S.insp.pos[j].rem > 0 ? "作业" : "等移栽") : "空"));
-  ["unload", "visual", "pack"].forEach(id => push(id, S.srv[id].name, S.srv[id].st, sName[srvState(S.srv[id])]));
+  CFG.post.forEach((s, j) => push(s.id, s.name, S.post[j].st, sName[srvState(S.post[j])]));
   return rows;
 }
 function renderDash() {
-  const th = theory(CFG), r10 = rollTakt(30), avg = avgTakt(), last = S.outTimes.length ? S.outTimes[S.outTimes.length - 1] : 0;
-  const wipTools = CFG.tools - S.retBuf.length;
+  const th = theory(CFG), r30 = rollTakt(30), avg = avgTakt();
   const coolN = S.cool.groups.reduce((s, g) => s + g.length, 0);
   const downs = Object.entries(S.down).filter(([, d]) => d.until > S.t);
   const rows = stationRows();
-  const hr = Array.from(S.hourly.slice(-12), x => x || 0), hmax = Math.max(1, ...hr.map(x => x || 0)), h0 = Math.max(0, S.hourly.length - 12);
-  const expect = th.LT ? 3600 / th.LT : 0;
-  const bars = hr.map((v, i) => `<div title="第${h0 + i + 1}小时 ${v || 0}件" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px">
-      <span style="font-size:10px;color:var(--ink2)">${v || 0}</span><i style="display:block;width:70%;height:${Math.round((v || 0) / Math.max(hmax, expect) * 60)}px;background:var(--brand);border-radius:2px"></i></div>`).join("");
+  const hr = Array.from(S.hourly.slice(-12), x => x || 0), h0 = Math.max(0, S.hourly.length - 12);
+  const expect = th.LT ? 3600 / th.LT : 0, top = Math.max(1, expect, ...hr);
+  const bars = hr.map((v, i) => `<div title="第${h0 + i + 1}小时 ${v}件" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:2px;height:100%"><span style="font-size:10px;color:var(--ink2)">${v}</span><i style="display:block;width:70%;height:${Math.round(v / top * 60)}px;background:var(--brand);border-radius:2px"></i></div>`).join("");
   document.getElementById("p-dash").innerHTML = `
     <div class="kpis">
       <div class="kpi"><div class="l">累计产出</div><div class="v">${S.out}<small>件</small></div><div class="d">${S.out ? "首件 " + fmtDur(S.outTimes[0]) : "首件尚未下线（固化+冷却在途）"}</div></div>
-      <div class="kpi ${r10 && th.target ? (r10 <= th.target ? "ok" : "ng") : ""}"><div class="l">实时节拍（近30件）</div><div class="v">${r10 ? r10.toFixed(1) : "—"}<small>s/件</small></div><div class="d">平均 ${avg ? avg.toFixed(1) : "—"} s/件</div></div>
-      <div class="kpi"><div class="l">理论线体节拍</div><div class="v">${th.LT.toFixed(1)}<small>s/件</small></div><div class="d">约束：${th.src}${th.target ? " · 目标 " + th.target.toFixed(1) : ""}</div></div>
-      <div class="kpi"><div class="l">在制</div><div class="v">${wipTools}<small>/${CFG.tools} 工装在线</small></div><div class="d">冷却通道 ${coolN} 件 · 下游缓存 ${S.unlQ.length + S.visQ.length + S.packQ.length} 件</div></div>
+      <div class="kpi ${r30 && th.target ? (r30 <= th.target ? "ok" : "ng") : ""}"><div class="l">实时节拍（近30件）</div><div class="v">${r30 ? r30.toFixed(1) : "—"}<small>s/件</small></div><div class="d">平均 ${avg ? avg.toFixed(1) : "—"} s/件</div></div>
+      <div class="kpi"><div class="l">理论线体节拍（波动取均值）</div><div class="v">${th.LT.toFixed(1)}<small>s/件</small></div><div class="d">约束：${th.src}${th.target ? " · 目标 " + th.target.toFixed(1) : ""}</div></div>
+      <div class="kpi"><div class="l">在制</div><div class="v">${CFG.tools - S.retBuf.length}<small>/${CFG.tools} 工装在线</small></div><div class="d">冷却通道 ${coolN} 件 · 人工段缓存 ${S.postQ.reduce((s, q) => s + q.length, 0)} 件</div></div>
     </div>
     ${downs.length ? `<div class="warnbox">停机中：${downs.map(([k, d]) => `${targetName(k)}（${d.reason}，${d.until === Infinity ? "待恢复" : "剩 " + fmtClock(d.until - S.t)}）`).join("；")}</div>` : ""}
     ${S.scheduled.length ? `<div class="warnbox">计划干预：${S.scheduled.map(j => fmtClock(j.at - S.t) + " 后 " + describe(j.act)).join("；")}</div>` : ""}
-    <h3>每小时产出 <span class="sub">（虚线参考：理论 ${expect.toFixed(1)} 件/小时，不含 OEE）</span></h3>
+    <h3>每小时产出 <span class="sub">（红虚线：理论 ${expect.toFixed(1)} 件/小时，不含 OEE）</span></h3>
     <div style="display:flex;gap:3px;align-items:flex-end;height:80px;border-bottom:1px solid var(--line);position:relative">${bars || '<span class="sub">运行满 1 小时后显示</span>'}
-      ${expect ? `<div style="position:absolute;left:0;right:0;bottom:${Math.round(expect / Math.max(hmax, expect) * 60)}px;border-top:1.5px dashed var(--ng)"></div>` : ""}</div>
+      ${expect ? `<div style="position:absolute;left:0;right:0;bottom:${Math.round(expect / top * 60)}px;border-top:1.5px dashed var(--ng)"></div>` : ""}</div>
     <h3>工位状态与负荷 <span class="sub">（累计时间占比）</span></h3>
     <table><tr><th>工位</th><th>当前</th><th>作业 / 堵料 / 待料 / 停机</th><th class="n">作业率</th></tr>
-    ${rows.map(r => `<tr><td>${r.name}</td><td>${r.state}</td><td><div class="ubar"><i style="width:${r.u.work * 100}%;background:${COL.work}"></i><i style="width:${r.u.block * 100}%;background:${COL.block}"></i><i style="width:${r.u.idle * 100}%;background:${COL.idle}"></i><i style="width:${r.u.down * 100}%;background:${COL.down}"></i></div></td><td class="n">${pct(r.u.work)}</td></tr>`).join("")}
+    ${rows.map(r => `<tr><td>${esc(r.name)}</td><td>${r.state}</td><td><div class="ubar"><i style="width:${r.u.work * 100}%;background:${COL.work}"></i><i style="width:${r.u.block * 100}%;background:${COL.block}"></i><i style="width:${r.u.idle * 100}%;background:${COL.idle}"></i><i style="width:${r.u.down * 100}%;background:${COL.down}"></i></div></td><td class="n">${pct(r.u.work)}</td></tr>`).join("")}
     </table>
-    <div class="sub" style="margin-top:6px">读法：作业率接近 100% 的工位是瓶颈；它上游的工位「堵料」多、下游「待料」多。通道组看整体作业率。</div>`;
+    <div class="sub" style="margin-top:6px">读法：作业率接近 100% 的是瓶颈；其上游「堵料」多、下游「待料」多。通道列「作/堵/空」依次为通道内各工位状态。</div>`;
 }
 
 /* ================= 基础数据表 ================= */
+function tInputs(path, t) {
+  t = normT(t);
+  const sel = `<select data-tt="${path}">${Object.entries(T_NAMES).map(([k, v]) => `<option value="${k}"${t.type === k ? " selected" : ""}>${v}</option>`).join("")}</select>`;
+  const f = (k, ph) => `<input class="in" style="width:62px" data-tv="${path}" data-tk="${k}" type="number" step="any" placeholder="${ph}" value="${t[k] ?? ""}">`;
+  const fields = t.type === "uniform" ? f("min", "下限") + f("max", "上限") : t.type === "normal" ? f("mean", "均值") + f("sd", "标准差") : t.type === "tri" ? f("min", "最小") + f("mode", "最可能") + f("max", "最大") : f("v", "秒");
+  return `<span style="display:inline-flex;gap:3px;flex-wrap:wrap;align-items:center">${sel}${fields}</span>`;
+}
+function stationTable(seg, title) {
+  const rows = CFG[seg].map((s, j) => `<tr><td><input class="in" data-nm="${seg}.${j}.name" value="${esc(s.name)}"></td><td>${tInputs(`${seg}.${j}.t`, s.t)}</td>
+    <td style="white-space:nowrap"><button class="sm" data-mv="${seg}.${j}.-1">↑</button><button class="sm" data-mv="${seg}.${j}.1">↓</button><button class="sm" data-del="${seg}.${j}">✕</button></td></tr>`).join("");
+  return `<table class="ed"><tr><th>${title}</th><th>放行时间</th><th></th></tr>${rows}</table><button class="sm" data-add="${seg}" style="margin-top:4px">＋ 增加工位</button>`;
+}
 function renderCfg() {
-  const c = CFG;
-  const num = (k, label) => `<div><label>${label}</label><input class="in" data-k="${k}" type="number" step="any" value="${getParam(k)}"></div>`;
-  document.getElementById("p-cfg").innerHTML = `
-    <div class="sub" style="margin-bottom:8px">黄色格可改。改时间类参数后点「应用」即时生效（下一件起）；改通道数量/冷却通道尺寸/每工装件数/检测工位启用需要「应用并重置」。</div>
-    <div class="row" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+  const c = CFG, P = document.getElementById("p-cfg");
+  const num = (k, label) => `<div><label>${label}</label><input class="in" data-k="${k}" type="number" step="any" value="${getPath(c, k)}"></div>`;
+  P.innerHTML = `
+    <div class="sub" style="margin-bottom:8px">黄色格可改，改完点「应用」。放行时间可选：固定 / 区间均匀波动 / 正态 / 三角。增删工位、改通道工位序列等结构变化会自动重建模拟。也可直接在 AI 助手里用一句话改。</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
       <button class="sm pri" id="cfgApply">应用</button><button class="sm" id="cfgApplyReset">应用并重置</button>
       <button class="sm" id="cfgImport">导入节拍分析表 .xlsx</button><button class="sm" id="cfgExport">导出 JSON</button><button class="sm" id="cfgLoadJson">导入 JSON</button><button class="sm" id="cfgDefault">恢复默认</button>
       <input type="file" id="fileX" accept=".xlsx" class="hidden"><input type="file" id="fileJ" accept=".json" class="hidden">
     </div>
-    <details class="cfg" open><summary>线体与工装</summary><div class="b grid2">
-      <div style="grid-column:1/3"><label>线体名称</label><input class="in" id="cfgName" value="${c.name}"></div>
-      ${num("N", "每工装装载件数 N")}${num("tools", "工装数 [套]")}
-      ${num("load", "上料工位 [s/工装]")}${num("pre", "预压工位 [s/工装]")}${num("demold", "脱模工位 [s/工装]")}${num("ret", "空工装回流 [s]")}
-      ${num("buf.feedQ", "预压后进料等待位 [个]")}
+    <details class="cfg" open><summary>线体、工装与流转方向</summary><div class="b grid2">
+      <div style="grid-column:1/3"><label>线体名称</label><input class="in" id="cfgName" value="${esc(c.name)}"></div>
+      ${num("N", "每工装装载件数 N")}${num("tools", "工装数 [套]")}${num("ret", "空工装回流 [s]")}${num("feedQ", "上料段后进料等待位 [个]")}
+      <div><label>流转方向</label><select id="cfgMirror" style="width:100%"><option value="0"${!c.layout.mirror ? " selected" : ""}>左 → 右</option><option value="1"${c.layout.mirror ? " selected" : ""}>右 → 左（镜像）</option></select></div>
+      <div><label>1# 通道位置</label><select id="cfgCh1" style="width:100%"><option value="near"${c.layout.ch1 === "near" ? " selected" : ""}>近端（靠上料/脱模）</option><option value="far"${c.layout.ch1 === "far" ? " selected" : ""}>远端</option></select></div>
       <div><label>通道派发策略</label><select id="cfgDisp" style="width:100%">${["nearest", "roundrobin", "farthest"].map(d => `<option value="${d}"${c.dispatch === d ? " selected" : ""}>${dispName(d)}</option>`).join("")}</select></div>
-      ${num("vari", "工时波动系数 (0=不波动)")}
+      ${num("vari", "固定时间的全局波动系数")}
     </div></details>
-    <details class="cfg"><summary>固化通道</summary><div class="b">
-      <div class="grid2">${num("Tch", "通道占用周期 T_ch [s/工装]")}
-      <div><label>通道内流转方式</label><select id="cfgMode" style="width:100%"><option value="2"${c.mode === 2 ? " selected" : ""}>加热位+冷却位(同步指进)</option><option value="1"${c.mode === 1 ? " selected" : ""}>通道内只有一件</option></select></div>
-      ${num("gapIn", "进料最小工装间距 [s]")}${num("gapOut", "出料最小工装间距 [s]")}</div>
+    <details class="cfg" open><summary>上料段工位链（按工装，秒/工装）</summary><div class="b">${stationTable("pre", "工位")}</div></details>
+    <details class="cfg" open><summary>固化通道</summary><div class="b">
+      <div class="grid2" style="margin-bottom:6px">
+        <div><label>通道内放行方式</label><select id="cfgIdx" style="width:100%"><option value="sync"${c.chIndex === "sync" ? " selected" : ""}>同步指进（全部到时一起前移）</option><option value="async"${c.chIndex === "async" ? " selected" : ""}>各位独立放行（到时且下位空即走）</option></select></div>
+        ${num("feedGap", "进料最小工装间距 [s]")}${num("outGap", "出料最小工装间距 [s]")}</div>
+      <table class="ed"><tr><th>通道内工位（按流向）</th><th>放行时间</th><th></th></tr>
+      ${c.chStages.map((s, k) => `<tr><td><input class="in" data-nm="chStages.${k}.name" value="${esc(s.name)}"></td><td>${tInputs(`chStages.${k}.t`, s.t)}</td><td style="white-space:nowrap"><button class="sm" data-mv="chStages.${k}.-1">↑</button><button class="sm" data-mv="chStages.${k}.1">↓</button><button class="sm" data-del="chStages.${k}">✕</button></td></tr>`).join("")}
+      </table><button class="sm" data-add="chStages" style="margin-top:4px">＋ 增加通道内工位</button>
       <table class="ed" style="margin-top:8px"><tr><th>通道</th><th>在用</th><th>进料输送 s</th><th>出料输送 s</th></tr>
-      ${c.channels.map((x, i) => `<tr><td>${i + 1}#</td><td><input type="checkbox" data-ch="${i}" ${x.on ? "checked" : ""}></td><td><input class="in" data-k="ch${i + 1}.tin" type="number" step="any" value="${x.tin}"></td><td><input class="in" data-k="ch${i + 1}.tout" type="number" step="any" value="${x.tout}"></td></tr>`).join("")}
-      </table><button class="sm" id="addCh" style="margin-top:4px">＋ 增加通道</button></div></details>
-    <details class="cfg"><summary>冷却通道</summary><div class="b grid2">
+      ${c.channels.map((x, i) => `<tr><td>${i + 1}#</td><td><input type="checkbox" data-ch="${i}" ${x.on ? "checked" : ""}></td><td><input class="in" data-k="channels.${i}.tin" type="number" step="any" value="${x.tin}"></td><td><input class="in" data-k="channels.${i}.tout" type="number" step="any" value="${x.tout}"></td></tr>`).join("")}
+      </table><button class="sm" id="addCh" style="margin-top:4px">＋ 增加通道</button> <button class="sm" id="delCh">－ 减少通道</button></div></details>
+    <details class="cfg"><summary>脱模与冷却通道</summary><div class="b">
+      <table class="ed"><tr><th>工位</th><th>放行时间</th></tr>
+        <tr><td><input class="in" data-nm="demold.name" value="${esc(c.demold.name)}"> <span class="sub">秒/工装</span></td><td>${tInputs("demold.t", c.demold.t)}</td></tr>
+        <tr><td><input class="in" data-nm="loader.name" value="${esc(c.loader.name)}"> <span class="sub">秒/件</span></td><td>${tInputs("loader.t", c.loader.t)}</td></tr></table>
+      <div class="grid2" style="margin-top:6px">
+      <div><label>冷却通道</label><select id="cfgCool" style="width:100%"><option value="1"${c.cool.on ? " selected" : ""}>使用（按组前移）</option><option value="0"${!c.cool.on ? " selected" : ""}>不用</option></select></div>
       ${num("cool.rows", "排数")}${num("cool.cols", "列数")}${num("cool.grp", "每组件数")}${num("cool.fwd", "每组前移时间 [s]")}
-      ${num("cool.minStop", "最短停顿 [s]")}${num("cool.r1", "脱模机械手单件 [s]")}${num("cool.r2", "检测上料机械手单件 [s]")}${num("cool.req", "工艺要求冷却时间 [s]")}
-    </div></details>
+      ${num("cool.minStop", "最短停顿 [s]")}${num("cool.r1", "脱模机械手单件 [s]（理论用）")}${num("cool.req", "工艺要求冷却时间 [s]")}</div></div></details>
     <details class="cfg"><summary>检测线</summary><div class="b">
       <div class="grid2">${num("insp.move", "夹爪移栽时间 [s]")}</div>
-      <table class="ed" style="margin-top:8px"><tr><th>#</th><th>启用</th><th>工位名称</th><th>作业时间 s</th></tr>
-      ${c.insp.st.map((s, i) => `<tr><td>${i + 1}</td><td><input type="checkbox" data-ins="${i}" ${s.on ? "checked" : ""}></td><td><input class="in" data-insn="${i}" value="${s.name}"></td><td><input class="in" data-k="insp.${i + 1}.t" type="number" step="any" value="${s.t}"></td></tr>`).join("")}
+      <table class="ed" style="margin-top:8px"><tr><th>启用</th><th>工位名称</th><th>作业时间</th></tr>
+      ${c.insp.st.map((s, i) => `<tr><td><input type="checkbox" data-ins="${i}" ${s.on ? "checked" : ""}></td><td><input class="in" data-nm="insp.st.${i}.name" value="${esc(s.name)}"></td><td>${tInputs(`insp.st.${i}.t`, s.t)}</td></tr>`).join("")}
       </table><button class="sm" id="addIns" style="margin-top:4px">＋ 增加检测工位</button></div></details>
-    <details class="cfg"><summary>人工段与装箱</summary><div class="b">
-      <div class="grid2">${num("unload", "下料 [s/件]")}${num("visual", "目检 [s/件]")}${num("place", "装箱摆入 [s/件]")}${num("perLayer", "每层件数")}${num("layers", "每箱层数")}
-      ${num("buf.unl", "下料缓存 [件]")}${num("buf.vis", "目检缓存 [件]")}${num("buf.pack", "装箱缓存 [件]")}</div>
+    <details class="cfg"><summary>人工段工位链与装箱</summary><div class="b">
+      ${stationTable("post", "工位（秒/件）")}
+      <div class="grid2" style="margin-top:8px">${num("postBuf", "各工位前缓存 [件]")}${num("perLayer", "每层件数")}${num("layers", "每箱层数")}
+      <div><label>装箱周期动作挂在</label><select id="cfgPackAt" style="width:100%"><option value="">（无）</option>${c.post.map((s, j) => `<option value="${j}"${s.pack ? " selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div></div>
       <table class="ed" style="margin-top:8px"><tr><th>启用</th><th>周期动作</th><th>单次 s</th><th>频次</th></tr>
-      ${c.pack.map((p, i) => `<tr><td><input type="checkbox" data-pk="${i}" ${p.on ? "checked" : ""}></td><td><input class="in" data-pkn="${i}" value="${p.name}"></td><td><input class="in" data-k="pack.${i + 1}.t" type="number" step="any" value="${p.t}"></td><td><select data-pkf="${i}">${[[1, "每件"], [2, "每层"], [3, "每箱"]].map(o => `<option value="${o[0]}"${p.f == o[0] ? " selected" : ""}>${o[1]}</option>`).join("")}</select></td></tr>`).join("")}
+      ${c.pack.map((p, i) => `<tr><td><input type="checkbox" data-pk="${i}" ${p.on ? "checked" : ""}></td><td><input class="in" data-nm="pack.${i}.name" value="${esc(p.name)}"></td><td><input class="in" data-k="pack.${i}.t" type="number" step="any" value="${p.t}"></td><td><select data-pkf="${i}">${[[1, "每件"], [2, "每层"], [3, "每箱"]].map(o => `<option value="${o[0]}"${p.f == o[0] ? " selected" : ""}>${o[1]}</option>`).join("")}</select></td></tr>`).join("")}
       </table><button class="sm" id="addPk" style="margin-top:4px">＋ 增加动作</button></div></details>
     <details class="cfg"><summary>订单（用于目标节拍，选填）</summary><div class="b grid2">
-      ${["dem:客户月需求[台]", "use:每台用量[件]", "days:月工作天数", "mins:每天工作分钟", "oee:OEE"].map(s => { const [k, l] = s.split(":"); return `<div><label>${l}</label><input class="in" data-dm="${k}" type="number" step="any" value="${c.demand[k]}"></div>`; }).join("")}
+      ${["dem:客户月需求[台]", "use:每台用量[件]", "days:月工作天数", "mins:每天工作分钟", "oee:OEE"].map(s => { const [k, l] = s.split(":"); return `<div><label>${l}</label><input class="in" data-k="demand.${k}" type="number" step="any" value="${c.demand[k]}"></div>`; }).join("")}
     </div></details>`;
-  const P = document.getElementById("p-cfg");
+
+  // 表单 → 草稿配置
   const collect = () => {
-    const before = JSON.stringify([CFG.N, CFG.mode, CFG.channels.length, CFG.cool.rows, CFG.cool.cols, CFG.cool.grp, CFG.insp.st.map(s => s.on)]);
-    const oldTools = CFG.tools;
-    P.querySelectorAll("[data-k]").forEach(el => { const [o, k] = ref(el.dataset.k); if (o && el.value !== "" && isFinite(+el.value)) o[k] = +el.value; });
-    const newTools = CFG.tools; CFG.tools = oldTools;
-    P.querySelectorAll("[data-ch]").forEach(el => CFG.channels[+el.dataset.ch].on = el.checked);
-    P.querySelectorAll("[data-ins]").forEach(el => CFG.insp.st[+el.dataset.ins].on = el.checked);
-    P.querySelectorAll("[data-insn]").forEach(el => CFG.insp.st[+el.dataset.insn].name = el.value);
-    P.querySelectorAll("[data-pk]").forEach(el => CFG.pack[+el.dataset.pk].on = el.checked);
-    P.querySelectorAll("[data-pkn]").forEach(el => CFG.pack[+el.dataset.pkn].name = el.value);
-    P.querySelectorAll("[data-pkf]").forEach(el => CFG.pack[+el.dataset.pkf].f = +el.value);
-    P.querySelectorAll("[data-dm]").forEach(el => CFG.demand[el.dataset.dm] = +el.value || 0);
-    CFG.name = document.getElementById("cfgName").value || CFG.name;
-    CFG.dispatch = document.getElementById("cfgDisp").value;
-    CFG.mode = +document.getElementById("cfgMode").value;
-    const after = JSON.stringify([CFG.N, CFG.mode, CFG.channels.length, CFG.cool.rows, CFG.cool.cols, CFG.cool.grp, CFG.insp.st.map(s => s.on)]);
-    return { structural: before !== after, newTools };
+    const d = clone(CFG);
+    P.querySelectorAll("[data-k]").forEach(el => { if (el.value !== "" && isFinite(+el.value)) setPath(d, el.dataset.k, +el.value); });
+    P.querySelectorAll("[data-nm]").forEach(el => setPath(d, el.dataset.nm, el.value));
+    P.querySelectorAll("[data-tt]").forEach(el => {
+      const path = el.dataset.tt, ty = el.value, vals = {};
+      P.querySelectorAll(`[data-tv="${path}"]`).forEach(x => vals[x.dataset.tk] = +x.value);
+      const old = normT(getPath(CFG, path)), m = tMean(old);
+      let t = { type: ty, ...vals };
+      if (ty !== old.type) t = ty === "uniform" ? { type: ty, min: m, max: m } : ty === "normal" ? { type: ty, mean: m, sd: 0 } : ty === "tri" ? { type: ty, min: m, mode: m, max: m } : T(m);
+      setPath(d, path, normT(t));
+    });
+    P.querySelectorAll("[data-ch]").forEach(el => d.channels[+el.dataset.ch].on = el.checked);
+    P.querySelectorAll("[data-ins]").forEach(el => d.insp.st[+el.dataset.ins].on = el.checked);
+    P.querySelectorAll("[data-pk]").forEach(el => d.pack[+el.dataset.pk].on = el.checked);
+    P.querySelectorAll("[data-pkf]").forEach(el => d.pack[+el.dataset.pkf].f = +el.value);
+    d.name = document.getElementById("cfgName").value || d.name;
+    d.dispatch = document.getElementById("cfgDisp").value;
+    d.chIndex = document.getElementById("cfgIdx").value;
+    d.layout.mirror = document.getElementById("cfgMirror").value === "1";
+    d.layout.ch1 = document.getElementById("cfgCh1").value;
+    d.cool.on = document.getElementById("cfgCool").value === "1";
+    const pa = document.getElementById("cfgPackAt").value;
+    d.post.forEach((s, j) => s.pack = String(j) === pa);
+    return d;
   };
-  document.getElementById("cfgApply").onclick = () => {
-    const r = collect(); saveCfg();
-    if (r.structural) { resetSim(); CFG.tools = r.newTools; resetSim(); logEv("结构参数变化，已自动重置", ""); }
-    else { setTools(r.newTools); logEv("基础数据已应用（下一件起生效）", ""); }
+  const commit = (d, forceReset) => {
+    const tools = d.tools; d.tools = CFG.tools;
+    const before = structSig(CFG); CFG = normCfg(d); saveCfg();
+    if (forceReset || structSig(CFG) !== before) { CFG.tools = tools; saveCfg(); resetSim(); }
+    else setTools(tools);
     renderAll();
   };
-  document.getElementById("cfgApplyReset").onclick = () => { const r = collect(); CFG.tools = r.newTools; saveCfg(); resetSim(); renderAll(); };
-  document.getElementById("addCh").onclick = () => { collect(); const l = CFG.channels[CFG.channels.length - 1] || { tin: 15, tout: 15 }; CFG.channels.push({ on: true, tin: l.tin + 8.5, tout: l.tout + 8.5 }); saveCfg(); renderCfg(); };
-  document.getElementById("addIns").onclick = () => { collect(); CFG.insp.st.push({ on: true, name: "", t: 0 }); saveCfg(); renderCfg(); };
-  document.getElementById("addPk").onclick = () => { collect(); CFG.pack.push({ on: true, name: "", t: 0, f: 1 }); saveCfg(); renderCfg(); };
-  document.getElementById("cfgDefault").onclick = () => { if (!confirm("恢复为默认的定子自粘钢固化线数据？")) return; CFG = clone(DEFAULT_CFG); saveCfg(); resetSim(); renderAll(); };
-  document.getElementById("cfgExport").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(CFG, null, 2)], { type: "application/json" })); a.download = "line_sim_config.json"; a.click(); };
-  document.getElementById("cfgLoadJson").onclick = () => document.getElementById("fileJ").click();
-  document.getElementById("fileJ").onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { try { CFG = Object.assign(clone(DEFAULT_CFG), JSON.parse(t)); saveCfg(); resetSim(); renderAll(); } catch (err) { alert("JSON 解析失败：" + err.message); } }); };
-  document.getElementById("cfgImport").onclick = () => document.getElementById("fileX").click();
-  document.getElementById("fileX").onchange = e => { const f = e.target.files[0]; if (f) importXlsx(f); };
+  P.querySelector("#cfgApply").onclick = () => { commit(collect(), false); logEv("基础数据已应用", ""); };
+  P.querySelector("#cfgApplyReset").onclick = () => commit(collect(), true);
+  P.querySelectorAll("[data-tt]").forEach(el => el.onchange = () => { const d = collect(); CFG = normCfg(d); saveCfg(); renderCfg(); });
+  P.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
+    const d = collect(), seg = b.dataset.add, arr = d[seg], last = arr[arr.length - 1];
+    arr.push(seg === "chStages" ? { name: "冷却" + (arr.filter(x => /冷却/.test(x.name)).length + 1), t: clone(last ? last.t : T(600)) } : { name: "新工位", t: T(10) });
+    commit(d, false);
+  });
+  P.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
+    const d = collect(), [seg, j] = b.dataset.del.split(".");
+    if ((seg === "pre" || seg === "chStages") && d[seg].length <= 1) return alert("至少保留一个工位");
+    d[seg].splice(+j, 1); commit(d, false);
+  });
+  P.querySelectorAll("[data-mv]").forEach(b => b.onclick = () => {
+    const d = collect(), [seg, j, dir] = b.dataset.mv.split("."), a = d[seg], i = +j, k = i + +dir;
+    if (k < 0 || k >= a.length) return; [a[i], a[k]] = [a[k], a[i]]; commit(d, false);
+  });
+  P.querySelector("#addCh").onclick = () => { const d = collect(), l = d.channels[d.channels.length - 1] || { tin: 15, tout: 15 }; d.channels.push({ on: true, tin: l.tin + 8.5, tout: l.tout + 8.5 }); commit(d, false); };
+  P.querySelector("#delCh").onclick = () => { const d = collect(); if (d.channels.length > 1) { d.channels.pop(); commit(d, false); } };
+  P.querySelector("#addIns").onclick = () => { const d = collect(); d.insp.st.push({ on: true, name: "", t: T(10) }); commit(d, false); };
+  P.querySelector("#addPk").onclick = () => { const d = collect(); d.pack.push({ on: true, name: "", t: 0, f: 1 }); CFG = normCfg(d); saveCfg(); renderCfg(); };
+  P.querySelector("#cfgDefault").onclick = () => { if (!confirm("恢复为默认的定子自粘钢固化线数据？")) return; CFG = normCfg(DEFAULT_CFG); saveCfg(); resetSim(); renderAll(); };
+  P.querySelector("#cfgExport").onclick = () => { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(CFG, null, 2)], { type: "application/json" })); a.download = "line_sim_config.json"; a.click(); };
+  P.querySelector("#cfgLoadJson").onclick = () => P.querySelector("#fileJ").click();
+  P.querySelector("#fileJ").onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => { try { CFG = normCfg(JSON.parse(t)); saveCfg(); resetSim(); renderAll(); } catch (err) { alert("JSON 解析失败：" + err.message); } }); };
+  P.querySelector("#cfgImport").onclick = () => P.querySelector("#fileX").click();
+  P.querySelector("#fileX").onchange = e => { const f = e.target.files[0]; if (f) importXlsx(f); };
 }
 
-// 读取《节拍分析表》9.2 基础数据录入（固化线 15 列版单元格位置）
+// 读取《节拍分析表》9.2 基础数据录入（自粘钢固化线 15 列版单元格位置）
 function loadScript(src) { return new Promise((ok, no) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => no(new Error("加载失败 " + src)); document.head.appendChild(s); }); }
 async function importXlsx(file) {
   try {
@@ -990,77 +1208,69 @@ async function importXlsx(file) {
     const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
     const ws = wb.Sheets["9.2 基础数据录入"];
     if (!ws) throw new Error("没有找到「9.2 基础数据录入」工作表");
-    const v = a => { const c = ws[a]; return c ? c.v : undefined; };
+    const v = a => { const x = ws[a]; return x ? x.v : undefined; };
     const n = (a, d = 0) => { const x = parseFloat(v(a)); return isFinite(x) ? x : d; };
     if (!/固化/.test(String(v("B2") || "")) && v("E57") === undefined) throw new Error("该表不是自粘钢固化线节拍分析表（9.2 区结构不符）");
-    const c = clone(DEFAULT_CFG);
-    const title = String(v("B2") || ""), title2 = String((wb.Sheets["过程确认"] || {})["B30"] ? wb.Sheets["过程确认"]["B30"].v : "");
-    c.name = title2 || (/转子/.test(title) ? "转子自粘钢固化线" : "定子自粘钢固化线");
+    const c = clone(DEFAULT_CFG), pc = wb.Sheets["过程确认"];
+    c.name = (pc && pc.B30 && pc.B30.v) || (/转子/.test(String(v("B2"))) ? "转子自粘钢固化线" : "定子自粘钢固化线");
     c.demand = { dem: n("E10"), use: n("E11", 1), days: n("E13", 26), mins: n("E14", 1320), oee: n("E15", 0.85) };
-    c.mode = n("E25", 2) === 1 ? 1 : 2;
+    const mode = n("E25", 2) === 1 ? 1 : 2;
+    const Tch = n("E26") > 0 ? n("E26") : (mode === 2 ? Math.max(n("E23"), n("E24")) : n("E23") + n("E24"));
+    c.chStages = mode === 2 ? [{ name: "加热固化", t: T(Tch) }, { name: "冷却", t: T(Tch) }] : [{ name: "加热固化", t: T(Tch) }];
     c.N = n("E27", 1) || 1;
-    c.Tch = n("E26") > 0 ? n("E26") : (c.mode === 2 ? Math.max(n("E23"), n("E24")) : n("E23") + n("E24"));
-    c.channels = [];
-    for (let r = 36; r <= 45; r++) c.channels.push({ on: n("C" + r) === 1, tin: n("D" + r), tout: n("E" + r) });
-    c.gapIn = n("E48"); c.gapOut = n("E49"); c.load = n("E57"); c.pre = n("E59"); c.demold = n("E61"); c.ret = n("E67"); c.tools = n("E69", 20);
-    c.cool = { rows: n("E82", 3), cols: n("E83", 16), grp: n("E84", 6), fwd: n("E85"), minStop: n("E86"), r1: n("E87"), r2: n("E88"), req: n("E93") };
-    c.insp.move = n("E100");
-    c.insp.st = [];
-    for (let r = 102; r <= 107; r++) c.insp.st.push({ on: n("C" + r) === 1, name: String(v("D" + r) || ""), t: n("E" + r) });
-    c.unload = n("E116"); c.visual = n("E117"); c.place = n("E118"); c.perLayer = n("E119", 1); c.layers = n("E120", 1);
-    c.pack = [];
-    for (let r = 125; r <= 134; r++) { const nm = v("D" + r); if (nm === undefined && !n("E" + r)) continue; c.pack.push({ on: n("C" + r) === 1, name: String(nm || ""), t: n("E" + r), f: n("F" + r, 1) }); }
-    CFG = c; saveCfg(); resetSim(); renderAll();
-    logEv(`已导入「${file.name}」：T_ch ${c.Tch}s，${c.channels.filter(x => x.on).length} 通道，工装 ${c.tools} 套，N=${c.N}`, "ok");
+    c.channels = []; for (let r = 36; r <= 45; r++) c.channels.push({ on: n("C" + r) === 1, tin: n("D" + r), tout: n("E" + r) });
+    c.feedGap = n("E48"); c.outGap = n("E49");
+    c.pre = [{ id: "load", name: "上料工位", t: T(n("E57")) }, { id: "pre", name: "预压工位", t: T(n("E59")) }];
+    c.demold = { name: "脱模工位", t: T(n("E61")) }; c.ret = n("E67"); c.tools = n("E69", 20);
+    c.cool = { on: true, rows: n("E82", 3), cols: n("E83", 16), grp: n("E84", 6), fwd: n("E85"), minStop: n("E86"), r1: n("E87"), req: n("E93") };
+    c.loader = { name: "检测线上料机械手", t: T(n("E88")) };
+    c.insp.move = n("E100"); c.insp.st = [];
+    for (let r = 102; r <= 107; r++) c.insp.st.push({ on: n("C" + r) === 1, name: String(v("D" + r) || ""), t: T(n("E" + r)) });
+    c.post = [{ id: "unload", name: "下料(人工)", t: T(n("E116")) }, { id: "visual", name: "目检", t: T(n("E117")) }, { id: "pack", name: "装箱", t: T(n("E118")), pack: true }];
+    c.perLayer = n("E119", 1); c.layers = n("E120", 1);
+    c.pack = []; for (let r = 125; r <= 134; r++) { const nm = v("D" + r); if (nm === undefined && !n("E" + r)) continue; c.pack.push({ on: n("C" + r) === 1, name: String(nm || ""), t: n("E" + r), f: n("F" + r, 1) }); }
+    CFG = normCfg(c); saveCfg(); resetSim(); renderAll();
+    logEv(`已导入「${file.name}」：T_ch ${Tch}s，${CFG.channels.filter(x => x.on).length} 通道，工装 ${CFG.tools} 套，N=${CFG.N}`, "ok");
   } catch (err) { alert("导入失败：" + err.message); }
 }
 
 /* ================= 日志 / 聊天 UI ================= */
+const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 function logEv(msg, cls) {
-  const L = (S && S.log) || []; L.push({ t: S ? S.t : 0, msg, cls }); if (L.length > 400) L.shift();
-  if (S) S.log = L;
-  const el = document.getElementById("p-log");
-  if (el && !el.classList.contains("hidden")) renderLog();
+  if (!S) return; S.log.push({ t: S.t, msg, cls }); if (S.log.length > 400) S.log.shift();
+  if (!document.getElementById("p-log").classList.contains("hidden")) renderLog();
 }
-function renderLog() {
-  document.getElementById("p-log").innerHTML = (S.log || []).slice().reverse().map(e => `<div class="${e.cls || ""}"><b>${fmtClock(e.t)}</b>${esc(e.msg)}</div>`).join("") || '<div class="sub">暂无事件</div>';
-}
-const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
-function addMsg(cls, text, acts, src) {
+function renderLog() { document.getElementById("p-log").innerHTML = S.log.slice().reverse().map(e => `<div class="${e.cls || ""}"><b>${fmtClock(e.t)}</b>${esc(e.msg)}</div>`).join("") || '<div class="sub">暂无事件</div>'; }
+function addMsg(cls, txt, acts, src) {
   const d = document.createElement("div"); d.className = "msg " + cls;
-  d.innerHTML = esc(text) + (acts && acts.length ? `<div class="acts">${acts.map(esc).join("<br>")}</div>` : "") + (src ? `<div class="acts">— ${esc(src)} · ${clockText()}</div>` : "");
+  d.innerHTML = esc(txt) + (acts && acts.length ? `<div class="acts">${acts.map(esc).join("<br>")}</div>` : "") + (src ? `<div class="acts">— ${esc(src)} · ${clockText()}</div>` : "");
   const ch = document.getElementById("chat"); ch.appendChild(d); ch.parentElement.scrollTop = 1e9; return d;
 }
 
 /* ================= 主循环 ================= */
-let SPEED = 60, lastFrame = 0, acc = 0;
+let SPEED = 60, lastFrame = 0, acc = 0, uiTick = 0;
 function setSpeed(x) { if (!(x > 0)) return; SPEED = Math.min(3000, x); const sel = document.getElementById("speed"); if (![...sel.options].some(o => +o.value === SPEED)) sel.add(new Option(SPEED, SPEED)); sel.value = SPEED; logEv("倍速 " + SPEED + "×", ""); }
 function setRun(on) { S.running = on; document.getElementById("btnRun").textContent = on ? "⏸ 暂停" : "▶ 运行"; }
 function fastForward(sec) { const n = Math.round(sec / DT); for (let i = 0; i < n; i++) step(); logEv("快进 " + fmtDur(sec), ""); renderAll(); }
-let uiTick = 0;
 function frame(ts) {
   const dt = lastFrame ? Math.min(0.1, (ts - lastFrame) / 1000) : 0; lastFrame = ts;
-  if (S.running) {
-    acc += dt * SPEED;
-    let n = 0; while (acc >= DT && n < 6000) { step(); acc -= DT; n++; }
-    if (n >= 6000) acc = 0;
-  }
+  if (S.running) { acc += dt * SPEED; let n = 0; while (acc >= DT && n < 6000) { step(); acc -= DT; n++; } if (n >= 6000) acc = 0; }
   draw();
   document.getElementById("clock").innerHTML = clockText() + `<small>已运行 ${fmtDur(S.t)}</small>`;
   if (ts - uiTick > 500) { uiTick = ts; if (!document.getElementById("p-dash").classList.contains("hidden")) renderDash(); if (!document.getElementById("p-log").classList.contains("hidden")) renderLog(); updatePop(); }
   requestAnimationFrame(frame);
 }
 function renderAll() { document.getElementById("lineName").textContent = CFG.name + " · 流转模拟"; renderDash(); renderCfg(); renderLog(); }
-function saveCfg() { store.set("lsx-sim-cfg", CFG); }
+function saveCfg() { store.set("lsx-sim-cfg2", CFG); }
 
 /* ---- 点击工位弹窗 ---- */
 let popId = null;
 function updatePop() {
   const pop = document.getElementById("pop");
   if (!popId) { pop.classList.add("hidden"); return; }
-  const d = S.down[popId];
-  const row = stationRows().find(r => r.id === popId || r.id === popId.split(".")[0]);
-  pop.querySelector(".pi").innerHTML = `${d ? `<span style="color:var(--ng)">${d.reason}中 · ${d.until === Infinity ? "待恢复" : "剩 " + fmtClock(d.until - S.t)}</span><br>` : ""}${row ? `作业率 ${pct(row.u.work)} · 堵料 ${pct(row.u.block)} · 待料 ${pct(row.u.idle)} · 停机 ${pct(row.u.down)}` : ""}`;
+  const d = S.down[popId], row = stationRows().find(r => r.id === popId || r.id === popId.split(".")[0]);
+  const pi = pop.querySelector(".pi"); if (!pi) return;
+  pi.innerHTML = `${d ? `<span style="color:var(--ng)">${esc(d.reason)}中 · ${d.until === Infinity ? "待恢复" : "剩 " + fmtClock(d.until - S.t)}</span><br>` : ""}${row ? `作业率 ${pct(row.u.work)} · 堵料 ${pct(row.u.block)} · 待料 ${pct(row.u.idle)} · 停机 ${pct(row.u.down)}` : ""}`;
 }
 cv.addEventListener("click", e => {
   const r = cv.getBoundingClientRect(), x = (e.clientX - r.left - offX) / scale, y = (e.clientY - r.top - offY) / scale;
@@ -1068,10 +1278,10 @@ cv.addEventListener("click", e => {
   const pop = document.getElementById("pop");
   if (!h) { popId = null; pop.classList.add("hidden"); return; }
   popId = h.id;
-  pop.innerHTML = `<h4>${targetName(h.id)}</h4><div class="pi sub"></div>
+  pop.innerHTML = `<h4>${esc(targetName(h.id))}</h4><div class="pi sub"></div>
     <div class="row"><button class="sm" data-m="10">停 10 分钟</button><button class="sm" data-m="30">停 30 分钟</button><button class="sm" data-m="0">停机待恢复</button><button class="sm" data-r="1">恢复</button><button class="sm" data-x="1">关闭</button></div>`;
   const stage = cv.parentElement.getBoundingClientRect();
-  pop.style.left = Math.min(stage.width - 260, e.clientX - stage.left + 8) + "px"; pop.style.top = Math.min(stage.height - 140, e.clientY - stage.top + 8) + "px";
+  pop.style.left = Math.max(0, Math.min(stage.width - 260, e.clientX - stage.left + 8)) + "px"; pop.style.top = Math.max(0, Math.min(stage.height - 140, e.clientY - stage.top + 8)) + "px";
   pop.classList.remove("hidden");
   pop.querySelectorAll("[data-m]").forEach(b => b.onclick = () => { applyAction({ op: "stop", target: h.id, minutes: +b.dataset.m, text: "停机" }); updatePop(); });
   pop.querySelector("[data-r]").onclick = () => { applyAction({ op: "resume", target: h.id }); updatePop(); };
@@ -1091,19 +1301,32 @@ document.getElementById("speed").onchange = e => { SPEED = +e.target.value; };
 document.getElementById("btnFF").onclick = () => fastForward(3600);
 document.getElementById("send").onclick = () => { const t = document.getElementById("ask"); send(t.value); t.value = ""; };
 document.getElementById("ask").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.getElementById("send").click(); } });
-const CHIPS = ["1通道加热工位维修，暂停运行15分钟", "脱模工位故障停机20分钟", "10分钟后预压保养5分钟", "上料节拍改为70", "工装数改为40", "通道派发改为轮流", "全部恢复", "600倍速"];
-document.getElementById("chips").innerHTML = CHIPS.map(c => `<button>${c}</button>`).join("") + `<button data-q="1">现在瓶颈在哪？</button>`;
-document.querySelectorAll("#chips button").forEach(b => b.onclick = () => { document.getElementById("ask").value = b.textContent; document.getElementById("ask").focus(); });
+const CHIPS = ["1通道加热工位维修，暂停运行15分钟", "固化通道增加一个冷却工位，变成加热固化-冷却1-冷却2", "冷却1 900s放行更改为900~1000秒之间波动", "在预压后增加打码工位，30秒", "流转方向改为从右向左", "通道改为各位独立放行", "脱模工位故障停机20分钟", "工装数改为40", "全部恢复", "现在瓶颈在哪？"];
+document.getElementById("chips").innerHTML = CHIPS.map(c => `<button>${c}</button>`).join("");
+document.querySelectorAll("#chips button").forEach(b => b.onclick = () => { const a = document.getElementById("ask"); a.value = b.textContent; a.focus(); });
 function syncAiUi() {
+  const d = AI_DEF[AI.prov] || AI_DEF.openai;
+  document.getElementById("aiProv").value = AI.prov;
   document.getElementById("aiKey").value = AI.key; document.getElementById("aiBase").value = AI.base; document.getElementById("aiModel").value = AI.model;
-  document.getElementById("aiMode").textContent = AI.key ? "Claude 已连接" : "本地指令解析";
+  document.getElementById("aiBase").placeholder = d.base || "https://api.anthropic.com"; document.getElementById("aiModel").placeholder = d.model;
+  document.getElementById("aiMode").textContent = AI.key ? (AI.prov === "claude" ? "Claude 已配置" : (AI.model || d.model) + " 已配置") : "本地指令解析";
 }
-document.getElementById("aiSave").onclick = () => { AI.key = document.getElementById("aiKey").value.trim(); AI.base = document.getElementById("aiBase").value.trim(); AI.model = document.getElementById("aiModel").value.trim() || "claude-opus-5-5"; store.set("lsx-sim-ai", AI); syncAiUi(); addMsg("sys", AI.key ? "已保存，后续指令由 Claude 处理。" : "未填 Key，使用本地规则解析。"); };
-document.getElementById("aiClear").onclick = () => { AI.key = ""; store.set("lsx-sim-ai", AI); syncAiUi(); };
+const readAiUi = () => { AI.prov = document.getElementById("aiProv").value; AI.key = document.getElementById("aiKey").value.trim(); AI.base = document.getElementById("aiBase").value.trim(); AI.model = document.getElementById("aiModel").value.trim(); store.set("lsx-sim-ai2", AI); syncAiUi(); };
+document.getElementById("aiProv").onchange = () => { AI.prov = document.getElementById("aiProv").value; AI.base = ""; AI.model = ""; syncAiUi(); };
+document.getElementById("aiSave").onclick = () => { readAiUi(); addMsg("sys", AI.key ? "已保存，后续指令交给大模型处理。" : "未填 Key，使用本地规则解析。"); };
+document.getElementById("aiTest").onclick = async () => {
+  readAiUi(); if (!AI.key) return addMsg("sys", "请先填 API Key。");
+  const p = addMsg("sys", "测试连接中…");
+  try {
+    const raw = AI.prov === "claude" ? await callClaude([{ role: "user", content: "连通性测试，只回复 {\"reply\":\"OK\",\"actions\":[]}" }]) : await callOpenAI([{ role: "user", content: "连通性测试，只回复 {\"reply\":\"OK\",\"actions\":[]}" }]);
+    p.textContent = "连接成功，模型答复：" + parseJSONReply(raw).reply;
+  } catch (e) { p.textContent = "连接失败：" + e.message + "。若提示 Failed to fetch 多为浏览器跨域拦截，可运行同目录 ai-proxy.js 后把 API 地址填为 http://localhost:8787/v1。"; }
+};
+document.getElementById("aiClear").onclick = () => { AI.key = ""; store.set("lsx-sim-ai2", AI); syncAiUi(); };
 window.addEventListener("resize", resize);
 
 resetSim(); syncAiUi(); renderAll(); resize();
-addMsg("sys", "在下方用中文下指令干预线体，例如「1通道加热工位维修，暂停运行15分钟」。点击画面中的工位也可直接停机/恢复。");
+addMsg("sys", "用中文下指令干预线体：停机/恢复、调节拍、改放行逻辑（如 900~1000 秒波动）、增删工位、改流转方向。点击画面中的工位也可直接停机/恢复。");
 requestAnimationFrame(frame);
 </script>
 </body>
